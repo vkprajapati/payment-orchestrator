@@ -2,6 +2,7 @@
 
 use App\Http\Controllers\Api\V1\ApiContextController;
 use App\Http\Controllers\Api\V1\PaymentController;
+use App\Http\Controllers\Api\V1\PaymentWebhookController;
 use Illuminate\Support\Facades\Route;
 
 Route::middleware('api.key')
@@ -19,3 +20,12 @@ Route::middleware('api.key')
         Route::get('/payments/{reference}', [PaymentController::class, 'show'])
             ->name('api.v1.payments.show');
     });
+
+/*
+ * Provider webhooks — intentionally OUTSIDE the api.key middleware
+ * group: callers are external payment providers, not merchant API
+ * clients. Authentication happens via provider-specific verification
+ * inside PaymentWebhookController.
+ */
+Route::post('/v1/webhooks/{provider}', [PaymentWebhookController::class, 'handle'])
+    ->name('api.v1.webhooks.handle');
