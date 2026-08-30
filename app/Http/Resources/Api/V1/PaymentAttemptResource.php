@@ -27,10 +27,15 @@ class PaymentAttemptResource extends JsonResource
         return [
             'payment_reference' => $this->payment->reference,
             'provider' => $this->provider,
+            'provider_payment_id' => $this->provider_payment_id,
             'status' => $this->status->value,
             'amount' => $this->amount,
             'currency' => $this->currency,
+            'failure_code' => $this->failure_code,
+            'failure_message' => $this->failure_message,
             'created_at' => $this->created_at->toISOString(),
+            'started_at' => $this->started_at?->toISOString(),
+            'completed_at' => $this->completed_at?->toISOString(),
         ];
     }
 }

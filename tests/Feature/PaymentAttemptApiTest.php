@@ -91,10 +91,15 @@ it('only exposes whitelisted fields in the response', function () {
     expect(array_keys($data))->toEqualCanonicalizing([
         'payment_reference',
         'provider',
+        'provider_payment_id',
         'status',
         'amount',
         'currency',
+        'failure_code',
+        'failure_message',
         'created_at',
+        'started_at',
+        'completed_at',
     ])
         ->and($data)->not->toHaveKeys(['id', 'merchant_id', 'payment_id', 'request_metadata', 'response_metadata']);
 });

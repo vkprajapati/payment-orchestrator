@@ -23,6 +23,9 @@ Route::middleware('api.key')
 
         Route::post('/payments/{reference}/attempts', [PaymentAttemptController::class, 'store'])
             ->name('api.v1.payments.attempts.store');
+
+        Route::post('/payments/{reference}/attempts/{attempt}/execute', [PaymentAttemptController::class, 'execute'])
+            ->name('api.v1.payments.attempts.execute');
     });
 
 /*

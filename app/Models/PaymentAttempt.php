@@ -85,4 +85,77 @@ class PaymentAttempt extends Model
     {
         return $this->status->isTerminal();
     }
+
+    /**
+     * Determine whether the attempt is eligible for execution.
+     *
+     * Only pending attempts can be processed; terminal states
+     * (succeeded, failed, cancelled) are rejected to prevent duplicate
+     * charges.
+     */
+    public function canProcess(): bool
+    {
+        return $this->status === PaymentAttemptStatus::Pending;
+    }
+
+    /**
+     * Transition the attempt to the processing state.
+     *
+     * Marks the attempt as started. Called inside the first transaction
+     * before the provider call.
+     */
+    public function markProcessing(): void
+    {
+        $this->status = PaymentAttemptStatus::Processing;
+        $this->started_at = now();
+        $this->save();
+    }
+
+    /**
+     * Mark the attempt as succeeded with the provider's payment id.
+     *
+     * Persists the provider reference and response metadata, then sets
+     * the completed timestamp. Called inside the second transaction after
+     * a successful provider response.
+     */
+    public function markSucceeded(?string $providerPaymentId, array $responseMetadata = []): void
+    {
+        $this->provider_payment_id = $providerPaymentId;
+        $this->response_metadata = $responseMetadata;
+        $this->status = PaymentAttemptStatus::Succeeded;
+        $this->completed_at = now();
+        $this->save();
+    }
+
+    /**
+     * Mark the attempt as failed.
+     *
+     * Persists failure details (code, message, response metadata) and
+     * the completed timestamp. Called inside the second transaction after
+     * a failed provider response.
+     */
+    public function markFailed(?string $providerPaymentId, ?string $failureCode, ?string $failureMessage, array $responseMetadata = []): void
+    {
+        $this->provider_payment_id = $providerPaymentId;
+        $this->failure_code = $failureCode;
+        $this->failure_message = $failureMessage;
+        $this->response_metadata = $responseMetadata;
+        $this->status = PaymentAttemptStatus::Failed;
+        $this->completed_at = now();
+        $this->save();
+    }
+
+    /**
+     * Mark the attempt as cancelled.
+     *
+     * Used when an attempt is abandoned without provider interaction
+     * (e.g. superseded by a newer attempt). Cancelled attempts are
+     * terminal and cannot be re-executed.
+     */
+    public function markCancelled(): void
+    {
+        $this->status = PaymentAttemptStatus::Cancelled;
+        $this->completed_at = now();
+        $this->save();
+    }
 }
