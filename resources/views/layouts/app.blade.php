@@ -27,6 +27,62 @@
         .text-secondary-custom { color: var(--text-secondary) !important; }
         .link-primary { color: var(--primary); text-decoration: none; }
         .link-primary:hover { color: var(--primary-hover); text-decoration: underline; }
+        .navbar-app {
+            background-color: var(--surface);
+            border-bottom: 1px solid var(--border);
+        }
+        .navbar-app .navbar-brand {
+            color: var(--text-primary);
+            font-weight: 700;
+        }
+        .workspace-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: .5rem;
+            background: var(--background);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: .5rem .75rem;
+        }
+        .workspace-badge .workspace-label {
+            display: block;
+            font-size: .7rem;
+            color: var(--text-secondary);
+            line-height: 1.1;
+        }
+        .workspace-badge .workspace-name {
+            display: block;
+            font-weight: 600;
+            font-size: .875rem;
+            line-height: 1.2;
+        }
+        .badge-role {
+            background: rgba(79, 70, 229, .1);
+            color: var(--primary);
+            font-weight: 600;
+            font-size: .75rem;
+        }
+        .navbar-app .nav-link {
+            color: var(--text-secondary);
+            font-weight: 500;
+            padding: .5rem .75rem;
+            border-radius: 6px;
+        }
+        .navbar-app .nav-link:hover,
+        .navbar-app .nav-link.active {
+            color: var(--primary);
+            background: rgba(79, 70, 229, .06);
+        }
+        .badge-status {
+            display: inline-block;
+            padding: .35rem .65rem;
+            border-radius: 6px;
+            font-size: .75rem;
+            font-weight: 600;
+        }
+        .badge-status-active { background: rgba(22, 163, 74, .1); color: var(--success); }
+        .badge-status-suspended { background: rgba(220, 38, 38, .1); color: var(--danger); }
+        .badge-status-inactive { background: rgba(100, 116, 139, .12); color: var(--text-secondary); }
         .profile-dropdown { position: relative; display: inline-block; }
         .profile-menu {
             display: none;
@@ -54,10 +110,67 @@
     </style>
 </head>
 <body>
-    <div class="container-fluid min-vh-100 p-0">
-        <div class="container py-4 py-lg-5">
-            @yield('content')
+    <nav class="navbar navbar-app navbar-expand-lg sticky-top py-3">
+        <div class="container">
+            <a href="{{ route('dashboard') }}" class="navbar-brand d-flex align-items-center">
+                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" fill="currentColor"
+                     viewBox="0 0 16 16" class="me-2" style="color: var(--primary);">
+                    <path d="M.5 3 .0 5v2v7c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V7.5v-2L15.5 5v-2a.5.5 0 0 0-.5-.5h-1a.5.5 0 0 0 0 1h.5v2v7a1 1 0 0 1-1 1H2a1 1 0 0 1-1-1V7.5V4.5 3h1a.5.5 0 0 0 0-1H.5z"/>
+                    <path d="M2 8h12v7a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V8zm2-6a.5.5 0 0 0 0 1h8a.5.5 0 0 0 0-2H4z"/>
+                </svg>
+                Payment Orchestrator
+            </a>
+            <ul class="navbar-nav flex-row gap-1 ms-lg-4">
+                <li class="nav-item">
+                    <a href="{{ route('dashboard') }}"
+                       class="nav-link {{ request()->routeIs('dashboard') ? 'active' : '' }}">
+                        Dashboard
+                    </a>
+                </li>
+                <li class="nav-item">
+                    <a href="{{ route('settings.workspace.edit') }}"
+                       class="nav-link {{ request()->routeIs('settings.workspace*') ? 'active' : '' }}">
+                        Workspace Settings
+                    </a>
+                </li>
+            </ul>
+            <div class="ms-auto d-flex align-items-center gap-3">
+                @if (auth()->check())
+                    @if ($currentMerchant ?? null)
+                        <div class="workspace-badge d-none d-md-inline-flex">
+                            <div>
+                                <span class="workspace-label">Current workspace</span>
+                                <span class="workspace-name">{{ $currentMerchant->name }}</span>
+                            </div>
+                        </div>
+                    @endif
+                    <div class="profile-dropdown">
+                        <button type="button" class="btn btn-outline-secondary d-flex align-items-center"
+                                style="border-color: var(--border); border-radius: 8px; padding: .5rem .75rem;">
+                            <span class="me-2 d-none d-sm-inline">{{ Auth::user()->name }}</span>
+                            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="none"
+                                 stroke="currentColor" stroke-width="2" stroke-linecap="round"
+                                 stroke-linejoin="round" viewBox="0 0 24 24">
+                                <polyline points="6 9 12 15 18 9"></polyline>
+                            </svg>
+                        </button>
+                        <div class="profile-menu">
+                            <a href="#" class="d-block px-3 py-2 small text-decoration-none">Profile</a>
+                            <a href="{{ route('settings.workspace.edit') }}" class="d-block px-3 py-2 small text-decoration-none">Workspace Settings</a>
+                            <form method="POST" action="{{ route('logout') }}">
+                                @csrf
+                                <button type="submit" class="d-block w-100 text-start px-3 py-2 small text-decoration-none">
+                                    Logout
+                                </button>
+                            </form>
+                        </div>
+                    </div>
+                @endif
+            </div>
         </div>
+    </nav>
+    <div class="container py-4 py-lg-5">
+        @yield('content')
     </div>
 </body>
 </html>

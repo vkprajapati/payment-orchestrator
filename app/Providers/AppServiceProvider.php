@@ -2,7 +2,13 @@
 
 namespace App\Providers;
 
+use App\Models\Merchant;
+use App\Policies\MerchantPolicy;
+use App\Services\Merchants\CurrentMerchant;
+use Illuminate\Support\Facades\Gate;
+use Illuminate\Support\Facades\View;
 use Illuminate\Support\ServiceProvider;
+use Illuminate\View\View as ViewFactory;
 
 class AppServiceProvider extends ServiceProvider
 {
@@ -11,7 +17,7 @@ class AppServiceProvider extends ServiceProvider
      */
     public function register(): void
     {
-        //
+        $this->app->singleton(CurrentMerchant::class);
     }
 
     /**
@@ -19,6 +25,12 @@ class AppServiceProvider extends ServiceProvider
      */
     public function boot(): void
     {
-        //
+        Gate::policy(Merchant::class, MerchantPolicy::class);
+
+        View::composer(['dashboard', 'layouts.app'], function (ViewFactory $view) {
+            if (auth()->check()) {
+                $view->with('currentMerchant', app(CurrentMerchant::class)->get());
+            }
+        });
     }
 }
