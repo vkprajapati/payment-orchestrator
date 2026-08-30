@@ -133,6 +133,12 @@
                         Workspace Settings
                     </a>
                 </li>
+                <li class="nav-item">
+                    <a href="{{ route('settings.api-keys.index') }}"
+                       class="nav-link {{ request()->routeIs('settings.api-keys*') ? 'active' : '' }}">
+                        API Keys
+                    </a>
+                </li>
             </ul>
             <div class="ms-auto d-flex align-items-center gap-3">
                 @if (auth()->check())

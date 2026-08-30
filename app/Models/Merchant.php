@@ -7,6 +7,7 @@ use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 
 #[Fillable(['name', 'slug', 'status', 'metadata'])]
 class Merchant extends Model
@@ -34,5 +35,13 @@ class Merchant extends Model
         return $this->belongsToMany(User::class)
             ->withPivot('role')
             ->withTimestamps();
+    }
+
+    /**
+     * The API keys that belong to the merchant.
+     */
+    public function apiKeys(): HasMany
+    {
+        return $this->hasMany(ApiKey::class);
     }
 }
