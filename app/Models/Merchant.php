@@ -44,4 +44,12 @@ class Merchant extends Model
     {
         return $this->hasMany(ApiKey::class);
     }
+
+    /**
+     * The payments that belong to the merchant.
+     */
+    public function payments(): HasMany
+    {
+        return $this->hasMany(Payment::class);
+    }
 }
