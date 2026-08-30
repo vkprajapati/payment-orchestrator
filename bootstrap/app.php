@@ -1,6 +1,7 @@
 <?php
 
 use App\Exceptions\InvalidApiKeyException;
+use App\Exceptions\PaymentProviderException;
 use App\Http\Middleware\AuthenticateApiKey;
 use App\Http\Middleware\EnsureCurrentMerchant;
 use Illuminate\Foundation\Application;
@@ -27,4 +28,19 @@ return Application::configure(basePath: dirname(__DIR__))
         $exceptions->shouldRenderJsonWhen(
             fn (Request $request) => $request->is('api/*') || $request->expectsJson(),
         );
+
+        $exceptions->render(function (PaymentProviderException $exception, Request $request) {
+            if ($request->is('api/*')) {
+                // Controlled provider failure (not configured / unsupported
+                // operation) on an API route: a client-fixable validation
+                // error. The message is static text from the exception and
+                // never includes secrets or raw provider responses.
+                return response()->json([
+                    'message' => $exception->getMessage(),
+                    'error' => 'provider_not_available',
+                ], 422);
+            }
+
+            return null;
+        });
     })->create();

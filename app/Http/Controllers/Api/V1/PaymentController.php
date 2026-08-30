@@ -81,9 +81,18 @@ class PaymentController extends Controller
     {
         $merchant = $this->authenticatedMerchant($context);
 
+        // Merchant-scoped lookup: an unknown reference and a reference
+        // owned by another merchant indistinguishably result in 404 —
+        // existence is never revealed across merchants. Not using
+        // firstOrFail() because its exception message would leak the
+        // internal model class in error payloads.
         $payment = $merchant->payments()
             ->where('reference', $reference)
-            ->firstOrFail();
+            ->first();
+
+        if ($payment === null) {
+            abort(response()->json(['message' => 'Not found.'], 404));
+        }
 
         return new PaymentResource($payment);
     }

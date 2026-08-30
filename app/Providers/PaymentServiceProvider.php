@@ -3,7 +3,9 @@
 namespace App\Providers;
 
 use App\Contracts\Payments\PaymentProvider;
+use App\Contracts\Payments\PaymentProviderResolver;
 use App\Contracts\Payments\PaymentWebhookProvider;
+use App\Services\Payments\DefaultPaymentProviderResolver;
 use App\Services\Payments\PaymentProviderManager;
 use App\Services\Payments\PaymentWebhookManager;
 use App\Services\Payments\Providers\MockPaymentProvider;
@@ -68,5 +70,12 @@ class PaymentServiceProvider extends ServiceProvider
 
             return $manager;
         });
+
+        // Provider routing: the default resolver picks an explicit
+        // provider when requested and falls back to the mock provider.
+        // TEMPORARY strategy — merchant configuration and routing rules
+        // will replace the fallback in a later step (see the resolver's
+        // docblock). Singleton is safe: stateless, holds no request data.
+        $this->app->singleton(PaymentProviderResolver::class, DefaultPaymentProviderResolver::class);
     }
 }

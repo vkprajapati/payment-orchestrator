@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\Api\V1\ApiContextController;
+use App\Http\Controllers\Api\V1\PaymentAttemptController;
 use App\Http\Controllers\Api\V1\PaymentController;
 use App\Http\Controllers\Api\V1\PaymentWebhookController;
 use Illuminate\Support\Facades\Route;
@@ -19,6 +20,9 @@ Route::middleware('api.key')
 
         Route::get('/payments/{reference}', [PaymentController::class, 'show'])
             ->name('api.v1.payments.show');
+
+        Route::post('/payments/{reference}/attempts', [PaymentAttemptController::class, 'store'])
+            ->name('api.v1.payments.attempts.store');
     });
 
 /*

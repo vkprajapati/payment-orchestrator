@@ -8,6 +8,7 @@ use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 
 /**
  * A provider-agnostic payment owned by exactly one merchant.
@@ -42,6 +43,17 @@ class Payment extends Model
     public function merchant(): BelongsTo
     {
         return $this->belongsTo(Merchant::class);
+    }
+
+    /**
+     * Get the processing attempts made for this payment.
+     *
+     * A payment may be tried through several providers over its lifetime;
+     * no default ordering is imposed — callers sort explicitly.
+     */
+    public function attempts(): HasMany
+    {
+        return $this->hasMany(PaymentAttempt::class);
     }
 
     /**
