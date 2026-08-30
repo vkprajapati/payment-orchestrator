@@ -3,6 +3,7 @@
 use App\Http\Controllers\Api\V1\ApiContextController;
 use App\Http\Controllers\Api\V1\PaymentAttemptController;
 use App\Http\Controllers\Api\V1\PaymentController;
+use App\Http\Controllers\Api\V1\PaymentProcessingController;
 use App\Http\Controllers\Api\V1\PaymentWebhookController;
 use Illuminate\Support\Facades\Route;
 
@@ -26,6 +27,9 @@ Route::middleware('api.key')
 
         Route::post('/payments/{reference}/attempts/{attempt}/execute', [PaymentAttemptController::class, 'execute'])
             ->name('api.v1.payments.attempts.execute');
+
+        Route::post('/payments/{reference}/process', [PaymentProcessingController::class, 'process'])
+            ->name('api.v1.payments.process');
     });
 
 /*
