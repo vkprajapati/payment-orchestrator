@@ -29,6 +29,13 @@ return [
 
         'p24' => [
             'enabled' => env('PAYMENT_P24_ENABLED', false),
+            'environment' => env('PAYMENT_P24_ENVIRONMENT', 'sandbox'),
+            'merchant_id' => env('P24_MERCHANT_ID'),
+            'pos_id' => env('P24_POS_ID'),
+            'api_key' => env('P24_API_KEY'),
+            'crc_key' => env('P24_CRC_KEY'),
+            'notify_url' => env('P24_NOTIFY_URL'),
+            'return_url' => env('P24_RETURN_URL'),
         ],
 
         'razorpay' => [
