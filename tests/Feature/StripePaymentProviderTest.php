@@ -77,7 +77,10 @@ it('supports charge only when enabled and configured', function () {
     stripeConfigure();
 
     expect(app(StripePaymentProvider::class)->supports(PaymentProvider::OPERATION_CHARGE))->toBeTrue()
-        ->and(app(StripePaymentProvider::class)->supports('refund'))->toBeFalse();
+        // Step 9.2: configured Stripe is refund-capable too — but unknown
+        // operations remain unsupported.
+        ->and(app(StripePaymentProvider::class)->supports(PaymentProvider::OPERATION_REFUND))->toBeTrue()
+        ->and(app(StripePaymentProvider::class)->supports('unknown-operation'))->toBeFalse();
 });
 
 it('exposes the stable stripe identifier', function () {
