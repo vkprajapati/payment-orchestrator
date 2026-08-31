@@ -4,10 +4,12 @@ declare(strict_types=1);
 
 namespace App\Http\Controllers\Api\V1;
 
+use App\Actions\Api\HandleIdempotentRequest;
 use App\Actions\Payments\ProcessPaymentWithFailover;
 use App\Exceptions\PaymentNotProcessableException;
 use App\Http\Controllers\Controller;
 use App\Http\Resources\Api\V1\PaymentProcessingResource;
+use App\Models\Merchant;
 use App\Services\ApiKeys\ApiRequestContext;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -30,6 +32,7 @@ class PaymentProcessingController extends Controller
         Request $request,
         ProcessPaymentWithFailover $process,
         ApiRequestContext $context,
+        HandleIdempotentRequest $idempotency,
     ): JsonResponse {
         $merchant = $context->merchant();
 
@@ -37,6 +40,28 @@ class PaymentProcessingController extends Controller
             return response()->json(['message' => 'Invalid API key.'], 401);
         }
 
+        // Idempotency-Key aware: an identical retry replays the stored
+        // response instead of routing the payment through the provider
+        // chain a second time; a key reuse for a different logical request
+        // (path/body) is rejected with a controlled 409.
+        return $idempotency->wrap(
+            $merchant,
+            $request,
+            $request->json()->all(),
+            fn (): JsonResponse => $this->performProcess($reference, $process, $merchant),
+        )->response;
+    }
+
+    /**
+     * The existing processing flow, unchanged. The idempotency reservation
+     * commits before this runs, so no lock is held while providers are
+     * contacted; the failover architecture manages its own transactions.
+     */
+    private function performProcess(
+        string $reference,
+        ProcessPaymentWithFailover $process,
+        Merchant $merchant,
+    ): JsonResponse {
         $payment = $merchant->payments()
             ->where('reference', $reference)
             ->lockForUpdate()

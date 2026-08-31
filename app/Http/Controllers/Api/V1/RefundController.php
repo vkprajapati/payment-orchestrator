@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Api\V1;
 
+use App\Actions\Api\HandleIdempotentRequest;
 use App\Actions\Payments\CreateRefund;
 use App\Actions\Payments\ProcessRefund;
 use App\Exceptions\PaymentProviderException;
@@ -43,6 +44,7 @@ class RefundController extends Controller
         ApiRequestContext $context,
         CreateRefund $createRefund,
         ProcessRefund $processRefund,
+        HandleIdempotentRequest $idempotency,
     ): JsonResponse {
         $merchant = $context->merchant();
 
@@ -50,6 +52,30 @@ class RefundController extends Controller
             return response()->json(['message' => 'Unauthenticated.'], 401);
         }
 
+        // Idempotency-Key aware: an identical retry replays the stored
+        // response instead of creating/executing a second refund; a key
+        // reuse for a different logical request is rejected with a
+        // controlled 409. The reservation commits before the provider is
+        // contacted, so no idempotency lock is ever held during provider
+        // HTTP calls.
+        return $idempotency->wrap(
+            $merchant,
+            $request,
+            $request->validated(),
+            fn (): JsonResponse => $this->performStore($reference, $request, $createRefund, $processRefund, $merchant),
+        )->response;
+    }
+
+    /**
+     * The existing refund creation/execution flow, unchanged.
+     */
+    private function performStore(
+        string $reference,
+        CreateRefundRequest $request,
+        CreateRefund $createRefund,
+        ProcessRefund $processRefund,
+        Merchant $merchant,
+    ): JsonResponse {
         $payment = $merchant->payments()
             ->where('reference', $reference)
             ->first();

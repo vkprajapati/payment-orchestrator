@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Api\V1;
 
+use App\Actions\Api\HandleIdempotentRequest;
 use App\Actions\Payments\CreateIdempotentPayment;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Api\V1\CreatePaymentRequest;
@@ -21,11 +22,18 @@ class PaymentController extends Controller
      * Bearer key server-side) — merchant identity is never accepted from
      * request input. 201 signals a newly created payment; 200 signals an
      * idempotent replay of an existing one.
+     *
+     * When the client sends an Idempotency-Key header, the request is
+     * executed through the database-backed idempotency orchestration: the
+     * operation runs at most once per (merchant, key, method, path) scope,
+     * identical retries replay the stored response, and a key reuse with a
+     * different payload is rejected with a controlled 409.
      */
     public function store(
         CreatePaymentRequest $request,
         CreateIdempotentPayment $action,
         ApiRequestContext $context,
+        HandleIdempotentRequest $idempotency,
     ): JsonResponse {
         $merchant = $context->merchant();
 
@@ -35,6 +43,25 @@ class PaymentController extends Controller
             return response()->json(['message' => 'Invalid API key.'], 401);
         }
 
+        return $idempotency->wrap(
+            $merchant,
+            $request,
+            $request->validated(),
+            fn (): JsonResponse => $this->performStore($request, $action, $merchant),
+        )->response;
+    }
+
+    /**
+     * The existing payment-creation flow, unchanged: the domain-level
+     * idempotent creation remains the second line of defense behind the
+     * generic orchestration layer (its stored payment key + unique
+     * constraint still guard against duplicate payments).
+     */
+    private function performStore(
+        CreatePaymentRequest $request,
+        CreateIdempotentPayment $action,
+        Merchant $merchant,
+    ): JsonResponse {
         $result = $action->create(
             $merchant,
             [
