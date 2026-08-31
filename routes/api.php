@@ -29,6 +29,12 @@ Route::middleware('api.key')
         Route::post('/payments/{reference}/refunds', [RefundController::class, 'store'])
             ->name('api.v1.payments.refunds.store');
 
+        Route::get('/payments/{reference}/refunds', [RefundController::class, 'index'])
+            ->name('api.v1.payments.refunds.index');
+
+        Route::get('/payments/{reference}/refunds/{refundReference}', [RefundController::class, 'show'])
+            ->name('api.v1.payments.refunds.show');
+
         Route::post('/payments/{reference}/attempts/{attempt}/execute', [PaymentAttemptController::class, 'execute'])
             ->name('api.v1.payments.attempts.execute');
 

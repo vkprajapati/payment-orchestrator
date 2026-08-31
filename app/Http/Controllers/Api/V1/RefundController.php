@@ -8,10 +8,12 @@ use App\Exceptions\PaymentProviderException;
 use App\Exceptions\RefundNotProcessableException;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Api\V1\CreateRefundRequest;
+use App\Http\Requests\Api\V1\ListRefundsRequest;
 use App\Http\Resources\Api\V1\RefundResource;
 use App\Models\Merchant;
 use App\Services\ApiKeys\ApiRequestContext;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
 use InvalidArgumentException;
 
 class RefundController extends Controller
@@ -85,5 +87,91 @@ class RefundController extends Controller
             ['data' => new RefundResource($refund)],
             201,
         );
+    }
+
+    /**
+     * List refunds belonging to a payment of the authenticated merchant.
+     *
+     * Isolation happens at the database query level: the lookup starts from
+     * the merchant relation, then resolves the payment, then the refunds —
+     * so no other merchant's rows can ever match. Pagination defaults to 20
+     * per page. Results are ordered newest-first with a deterministic
+     * id DESC secondary sort to keep ordering stable when created_at
+     * timestamps are identical.
+     *
+     * Unknown and cross-merchant payments are indistinguishable (both 404).
+     */
+    public function index(
+        string $reference,
+        ListRefundsRequest $request,
+        ApiRequestContext $context,
+    ): AnonymousResourceCollection {
+        $merchant = $context->merchant();
+
+        if ($merchant === null) {
+            abort(401, 'Invalid API key.');
+        }
+
+        $payment = $merchant->payments()
+            ->where('reference', $reference)
+            ->first();
+
+        if ($payment === null) {
+            abort(response()->json(['message' => 'Not found.'], 404));
+        }
+
+        $query = $payment->refunds()
+            ->orderByDesc('created_at')
+            ->orderByDesc('id');
+
+        if ($request->statusFilter() !== null) {
+            $query->where('status', $request->statusFilter());
+        }
+
+        if ($request->providerFilter() !== null) {
+            $query->where('provider', $request->providerFilter());
+        }
+
+        return RefundResource::collection($query->paginate($request->perPage()));
+    }
+
+    /**
+     * Retrieve a single refund belonging to a payment of the authenticated
+     * merchant.
+     *
+     * Security: the payment is resolved within the merchant's scope, then
+     * the refund is resolved within that payment's scope. An unknown payment
+     * reference, a cross-merchant payment, an unknown refund reference, or a
+     * refund belonging to another payment are all indistinguishable (404) —
+     * resource existence is never revealed across tenants.
+     */
+    public function show(
+        string $reference,
+        string $refundReference,
+        ApiRequestContext $context,
+    ): RefundResource {
+        $merchant = $context->merchant();
+
+        if ($merchant === null) {
+            abort(401, 'Invalid API key.');
+        }
+
+        $payment = $merchant->payments()
+            ->where('reference', $reference)
+            ->first();
+
+        if ($payment === null) {
+            abort(response()->json(['message' => 'Not found.'], 404));
+        }
+
+        $refund = $payment->refunds()
+            ->where('reference', $refundReference)
+            ->first();
+
+        if ($refund === null) {
+            abort(response()->json(['message' => 'Not found.'], 404));
+        }
+
+        return new RefundResource($refund);
     }
 }
