@@ -24,6 +24,19 @@ final class PaymentProviderException extends Exception
     }
 
     /**
+     * Thrown when a provider call fails in a controlled way during refund
+     * execution.
+     *
+     * The message is deliberately generic — the underlying SDK/HTTP error
+     * may carry secrets or internal details and is only logged, never
+     * surfaced to API consumers.
+     */
+    public static function refundFailed(string $provider): self
+    {
+        return new self("Payment provider [{$provider}] could not process the refund.");
+    }
+
+    /**
      * Thrown when an unknown provider name is requested from a manager.
      */
     public static function unknownProvider(string $provider): self

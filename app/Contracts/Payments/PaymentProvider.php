@@ -26,6 +26,17 @@ interface PaymentProvider
     public const OPERATION_CHARGE = 'charge';
 
     /**
+     * Operation identifier for refund execution, usable with supports().
+     *
+     * Capability checks must distinguish charge and refund: a
+     * charge-capable provider is NOT automatically refund-capable, so
+     * refund routing must verify supports(OPERATION_REFUND) explicitly.
+     * The refund execution itself lives in the segregated RefundProvider
+     * contract (same pattern as PaymentWebhookProvider).
+     */
+    public const OPERATION_REFUND = 'refund';
+
+    /**
      * The stable internal provider identifier (e.g. 'stripe', 'p24').
      * Not a display name — see PaymentProviderName.
      */

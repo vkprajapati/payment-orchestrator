@@ -8,6 +8,7 @@ use App\Enums\RefundStatus;
 use App\Models\Payment;
 use App\Models\PaymentAttempt;
 use App\Models\Refund;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use InvalidArgumentException;
 
@@ -158,6 +159,33 @@ class CreateRefund
         $refund->save();
 
         return $refund;
+    }
+
+    /**
+     * Create a refund while holding a row lock on the parent payment.
+     *
+     * This is the CONCURRENCY-SAFE entry point for API-created refunds:
+     * the payment row is locked FOR UPDATE inside a transaction, then the
+     * full domain validation — including the remaining-refundable-balance
+     * calculation — runs against the freshly locked state. Two concurrent
+     * refund requests therefore serialize: the second sees the first
+     * request's committed reservation and is rejected on over-refund.
+     *
+     * The lock is released when the transaction commits, before the
+     * provider refund call runs (ProcessRefund), so no long-lived locks
+     * are held during external HTTP calls.
+     *
+     * @param  array{amount?: mixed, currency?: string|null, payment_attempt_id?: int|null, provider?: string|null, reason?: string|null, request_metadata?: array<string, mixed>|null}  $data
+     *
+     * @throws InvalidArgumentException (see create())
+     */
+    public function createSafely(Payment $payment, array $data): Refund
+    {
+        return DB::transaction(function () use ($payment, $data): Refund {
+            $locked = Payment::query()->lockForUpdate()->findOrFail($payment->id);
+
+            return $this->create($locked, $data);
+        });
     }
 
     /**

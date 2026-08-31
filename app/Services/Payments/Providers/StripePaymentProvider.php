@@ -6,14 +6,19 @@ namespace App\Services\Payments\Providers;
 
 use App\Contracts\Payments\PaymentProvider;
 use App\Contracts\Payments\PaymentWebhookProvider;
+use App\Contracts\Payments\RefundProvider;
 use App\Data\Payments\PaymentProviderResult;
 use App\Data\Payments\PaymentProviderWebhookResult;
 use App\Enums\PaymentProviderName;
 use App\Enums\PaymentStatus;
+use App\Enums\RefundStatus;
 use App\Exceptions\PaymentProviderException;
 use App\Models\Payment;
+use App\Models\PaymentAttempt;
+use App\Models\Refund;
 use Illuminate\Support\Facades\App;
 use Stripe\PaymentIntent;
+use Stripe\Refund as StripeRefund;
 use Stripe\WebhookSignature;
 use Throwable;
 
@@ -28,7 +33,7 @@ use Throwable;
  * this class. Provider metadata stored on attempts is whitelisted to safe
  * fields only.
  */
-class StripePaymentProvider implements PaymentProvider, PaymentWebhookProvider
+class StripePaymentProvider implements PaymentProvider, PaymentWebhookProvider, RefundProvider
 {
     public function name(): string
     {
@@ -36,14 +41,15 @@ class StripePaymentProvider implements PaymentProvider, PaymentWebhookProvider
     }
 
     /**
-     * Charge is available only when the provider is enabled AND a secret
-     * key is configured. This capability gate is what routing and attempt
-     * creation rely on — a disabled Stripe never enters a routing plan and
-     * is never charged.
+     * Charge and refund are available only when the provider is enabled AND
+     * a secret key is configured. This capability gate is what routing,
+     * attempt creation, and refund execution rely on — a disabled Stripe
+     * never enters a routing plan, is never charged, and never refunds.
      */
     public function supports(string $operation): bool
     {
-        return $operation === self::OPERATION_CHARGE && $this->isConfigured();
+        return in_array($operation, [self::OPERATION_CHARGE, self::OPERATION_REFUND], true)
+            && $this->isConfigured();
     }
 
     /**
@@ -82,6 +88,70 @@ class StripePaymentProvider implements PaymentProvider, PaymentWebhookProvider
         }
 
         return $this->mapIntent($intent);
+    }
+
+    /**
+     * Create a Stripe refund against the ORIGINAL PaymentIntent that
+     * charged the payment, and map the outcome into the provider-neutral
+     * result.
+     *
+     * The refund is only issued against the provider payment id captured
+     * on the successful attempt — a Stripe payment is refunded through
+     * Stripe itself, never through another provider.
+     *
+     * Only a conclusively succeeded refund is reported as success. Any
+     * non-terminal Stripe refund status (pending/processing/failed/
+     * canceled) is a controlled non-success: refund webhook reconciliation
+     * is a later step, so a not-yet-completed refund must never be
+     * mislabelled as succeeded. A failed execution releases the refund
+     * reservation and the merchant may safely retry.
+     *
+     * @param  array<string, mixed>  $data  unused, kept for symmetry
+     */
+    public function refund(Payment $payment, PaymentAttempt $attempt, Refund $refund): PaymentProviderResult
+    {
+        if (! $this->isConfigured()) {
+            throw PaymentProviderException::notConfigured($this->name());
+        }
+
+        $paymentIntentId = $attempt->provider_payment_id;
+
+        if (! is_string($paymentIntentId) || $paymentIntentId === '') {
+            logger()->warning('Stripe refund rejected: original attempt has no provider payment id', [
+                'provider' => $this->name(),
+                'reference' => $payment->reference,
+            ]);
+
+            throw PaymentProviderException::refundFailed($this->name());
+        }
+
+        try {
+            $stripeRefund = $this->refundsService()->create([
+                'payment_intent' => $paymentIntentId,
+                'amount' => $refund->amount,
+                'currency' => strtolower($refund->currency),
+                'metadata' => [
+                    'internal_reference' => $payment->reference,
+                    'refund_reference' => $refund->reference,
+                ],
+            ]);
+        } catch (Throwable $exception) {
+            // Log only a safe summary; the raw SDK exception may contain
+            // credentials or internal details and is never surfaced.
+            logger()->warning('Stripe refund failed', [
+                'provider' => $this->name(),
+                'reference' => $payment->reference,
+                'exception' => get_class($exception),
+            ]);
+
+            throw PaymentProviderException::refundFailed($this->name());
+        }
+
+        if (! $stripeRefund instanceof StripeRefund) {
+            throw PaymentProviderException::refundFailed($this->name());
+        }
+
+        return $this->mapRefund($stripeRefund);
     }
 
     /**
@@ -205,6 +275,52 @@ class StripePaymentProvider implements PaymentProvider, PaymentWebhookProvider
         }
 
         return $client->paymentIntents;
+    }
+
+    /**
+     * Resolve the Refunds service.
+     *
+     * The client is resolved through the container so tests can swap a
+     * fake (the structural check accepts any object exposing a refunds
+     * service) — the production binding builds a real StripeClient from
+     * config.
+     */
+    private function refundsService(): object
+    {
+        $client = App::make('stripe.client');
+
+        if (! is_object($client) || ! property_exists($client, 'refunds')) {
+            throw PaymentProviderException::notConfigured($this->name());
+        }
+
+        return $client->refunds;
+    }
+
+    /**
+     * Map a Stripe Refund into a provider-neutral result.
+     */
+    private function mapRefund(StripeRefund $stripeRefund): PaymentProviderResult
+    {
+        if ($stripeRefund->status === StripeRefund::STATUS_SUCCEEDED) {
+            return new PaymentProviderResult(
+                success: true,
+                provider: $this->name(),
+                providerPaymentId: $stripeRefund->id,
+                status: RefundStatus::Succeeded->value,
+                message: 'Stripe refund succeeded.',
+                metadata: ['status' => $stripeRefund->status],
+            );
+        }
+
+        return new PaymentProviderResult(
+            success: false,
+            provider: $this->name(),
+            providerPaymentId: is_string($stripeRefund->id) ? $stripeRefund->id : null,
+            status: RefundStatus::Failed->value,
+            message: 'Stripe refund did not complete.',
+            failureCode: 'stripe_refund_not_completed',
+            metadata: ['status' => $stripeRefund->status],
+        );
     }
 
     /**

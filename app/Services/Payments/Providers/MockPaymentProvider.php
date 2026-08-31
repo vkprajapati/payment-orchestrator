@@ -4,29 +4,39 @@ namespace App\Services\Payments\Providers;
 
 use App\Contracts\Payments\PaymentProvider;
 use App\Contracts\Payments\PaymentWebhookProvider;
+use App\Contracts\Payments\RefundProvider;
 use App\Data\Payments\PaymentProviderResult;
 use App\Data\Payments\PaymentProviderWebhookResult;
 use App\Enums\PaymentProviderName;
 use App\Enums\PaymentStatus;
+use App\Enums\RefundStatus;
 use App\Models\Payment;
+use App\Models\PaymentAttempt;
+use App\Models\Refund;
 use Illuminate\Support\Str;
 
 /**
  * Fully working development/testing provider.
  *
- * Simulates a successful charge and a simple, structurally-verified
- * webhook flow so the provider and webhook architecture can be exercised
- * end-to-end without any real provider integration.
+ * Simulates a successful charge, a deterministic refund flow, and a
+ * simple, structurally-verified webhook flow so the provider and webhook
+ * architecture can be exercised end-to-end without any real provider
+ * integration.
  *
  * Like every provider it is side-effect free: no database writes, no
  * mutation of the Payment model.
  */
-class MockPaymentProvider implements PaymentProvider, PaymentWebhookProvider
+class MockPaymentProvider implements PaymentProvider, PaymentWebhookProvider, RefundProvider
 {
     /**
      * Simulated provider payment id: unique, secure, recognizable.
      */
     public const PAYMENT_ID_PREFIX = 'mock_';
+
+    /**
+     * Simulated provider refund id: unique, secure, recognizable.
+     */
+    public const REFUND_ID_PREFIX = 'mock_refund_';
 
     public function name(): string
     {
@@ -49,7 +59,42 @@ class MockPaymentProvider implements PaymentProvider, PaymentWebhookProvider
 
     public function supports(string $operation): bool
     {
-        return $operation === self::OPERATION_CHARGE;
+        return in_array($operation, [self::OPERATION_CHARGE, self::OPERATION_REFUND], true);
+    }
+
+    /**
+     * Deterministic simulated refund: always succeeds unless the refund's
+     * request metadata explicitly forces a failure (mock_refund_should_fail
+     * => true), which lets tests exercise the failed path without any HTTP.
+     *
+     * The refund's request metadata is only ever READ here — the provider
+     * never writes to the database or mutates any model.
+     */
+    public function refund(Payment $payment, PaymentAttempt $attempt, Refund $refund): PaymentProviderResult
+    {
+        $forceFailure = is_array($refund->request_metadata)
+            && (($refund->request_metadata['mock_refund_should_fail'] ?? false) === true);
+
+        if ($forceFailure) {
+            return new PaymentProviderResult(
+                success: false,
+                provider: $this->name(),
+                providerPaymentId: null,
+                status: RefundStatus::Failed->value,
+                message: 'Mock refund failed.',
+                failureCode: 'mock_refund_failed',
+                metadata: ['reference' => $refund->reference],
+            );
+        }
+
+        return new PaymentProviderResult(
+            success: true,
+            provider: $this->name(),
+            providerPaymentId: self::REFUND_ID_PREFIX.Str::random(24),
+            status: RefundStatus::Succeeded->value,
+            message: 'Refund processed successfully',
+            metadata: ['reference' => $refund->reference],
+        );
     }
 
     public function verifyWebhook(array $payload, array $headers = []): bool
