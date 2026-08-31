@@ -206,6 +206,7 @@ class StripePaymentProvider implements PaymentProvider, PaymentWebhookProvider, 
         $type = $payload['type'] ?? null;
         $object = is_array($payload['data']['object'] ?? null) ? $payload['data']['object'] : [];
         $intentId = is_string($object['id'] ?? null) ? $object['id'] : null;
+        $refundId = is_string($object['id'] ?? null) ? $object['id'] : null;
 
         if (! is_string($type)) {
             return new PaymentProviderWebhookResult(
@@ -215,6 +216,24 @@ class StripePaymentProvider implements PaymentProvider, PaymentWebhookProvider, 
                 status: null,
                 valid: false,
                 metadata: [],
+            );
+        }
+
+        // Refund events all carry a Refund object as data.object. The
+        // payment id slot is left null on purpose: a refund webhook must
+        // never reconcile (or resurrect) a payment attempt.
+        $refundStatus = $this->normalizeRefundStatus($object['status'] ?? null);
+
+        if (in_array($type, ['refund.created', 'refund.updated', 'charge.refund.updated'], true)
+            && $refundId !== null) {
+            return new PaymentProviderWebhookResult(
+                provider: $this->name(),
+                providerPaymentId: null,
+                providerRefundId: $refundId,
+                event: 'refund.'.($refundStatus ?? 'unknown'),
+                status: $refundStatus,
+                valid: true,
+                metadata: $this->safeObjectMetadata($object),
             );
         }
 
@@ -403,7 +422,7 @@ class StripePaymentProvider implements PaymentProvider, PaymentWebhookProvider, 
     {
         $safe = [];
 
-        foreach (['amount', 'currency', 'status', 'payment_method'] as $key) {
+        foreach (['amount', 'currency', 'status', 'payment_method', 'reason'] as $key) {
             $value = $object[$key] ?? null;
 
             if (is_string($value) || is_int($value)) {
@@ -412,5 +431,24 @@ class StripePaymentProvider implements PaymentProvider, PaymentWebhookProvider, 
         }
 
         return $safe;
+    }
+
+    /**
+     * Map a Stripe refund lifecycle status to the internal RefundStatus
+     * value, or null when Stripe's status has no internal equivalent.
+     */
+    private function normalizeRefundStatus(mixed $status): ?string
+    {
+        if (! is_string($status)) {
+            return null;
+        }
+
+        return match ($status) {
+            'succeeded' => RefundStatus::Succeeded->value,
+            'failed' => RefundStatus::Failed->value,
+            'canceled' => RefundStatus::Cancelled->value,
+            'pending' => RefundStatus::Pending->value,
+            default => null,
+        };
     }
 }

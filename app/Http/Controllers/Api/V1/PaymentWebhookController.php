@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api\V1;
 
 use App\Actions\Payments\ReconcilePaymentWebhook;
+use App\Actions\Payments\ReconcileRefundWebhook;
 use App\Exceptions\PaymentProviderException;
 use App\Http\Controllers\Controller;
 use App\Services\Payments\PaymentWebhookManager;
@@ -28,6 +29,7 @@ class PaymentWebhookController extends Controller
     public function __construct(
         private readonly PaymentWebhookManager $webhooks,
         private readonly ReconcilePaymentWebhook $reconcile,
+        private readonly ReconcileRefundWebhook $reconcileRefund,
     ) {}
 
     public function handle(Request $request, string $provider): JsonResponse
@@ -65,6 +67,14 @@ class PaymentWebhookController extends Controller
             // verified, parsed webhook. Unknown attempt IDs are ignored
             // safely (no creation) and still acknowledged generically.
             $this->reconcile->reconcile($webhookResult);
+
+            // Reconcile local Refund state from the same verified result.
+            // Payment webhooks (no provider refund id) no-op instantly, and
+            // refund webhooks never touch payment attempts (the payment id
+            // slot is null for refund events). Unknown refund IDs are
+            // ignored safely (no creation) while the webhook is still
+            // acknowledged generically.
+            $this->reconcileRefund->reconcile($webhookResult);
         } catch (Throwable) {
             // Never leak provider internals; never partially reconcile.
             return response()->json(['message' => 'Invalid webhook.'], 400);

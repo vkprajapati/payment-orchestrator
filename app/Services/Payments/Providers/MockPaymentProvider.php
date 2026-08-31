@@ -100,16 +100,44 @@ class MockPaymentProvider implements PaymentProvider, PaymentWebhookProvider, Re
     public function verifyWebhook(array $payload, array $headers = []): bool
     {
         // Development-mode verification: structural validity only. Real
-        // providers will verify cryptographic signatures here.
-        return isset($payload['provider_payment_id'], $payload['event'])
+        // providers will verify cryptographic signatures here. A webhook
+        // must carry an event and either a provider payment id (payment
+        // events) or a provider refund id (refund events).
+        $hasPaymentId = isset($payload['provider_payment_id'])
             && is_string($payload['provider_payment_id'])
-            && $payload['provider_payment_id'] !== ''
+            && $payload['provider_payment_id'] !== '';
+
+        $hasRefundId = isset($payload['provider_refund_id'])
+            && is_string($payload['provider_refund_id'])
+            && $payload['provider_refund_id'] !== '';
+
+        return isset($payload['event'])
             && is_string($payload['event'])
-            && $payload['event'] !== '';
+            && $payload['event'] !== ''
+            && ($hasPaymentId || $hasRefundId);
     }
 
     public function parseWebhook(array $payload, array $headers = []): PaymentProviderWebhookResult
     {
+        $refundId = $payload['provider_refund_id'] ?? null;
+
+        if (is_string($refundId) && $refundId !== '') {
+            // Refund event: identified by the provider refund id. The
+            // payment id slot is deliberately left null so payment
+            // reconciliation can never accidentally match a refund webhook.
+            return new PaymentProviderWebhookResult(
+                provider: $this->name(),
+                providerPaymentId: null,
+                providerRefundId: $refundId,
+                event: $payload['event'],
+                status: isset($payload['status']) && is_string($payload['status'])
+                    ? $payload['status']
+                    : null,
+                valid: $this->verifyWebhook($payload, $headers),
+                metadata: [],
+            );
+        }
+
         return new PaymentProviderWebhookResult(
             provider: $this->name(),
             providerPaymentId: $payload['provider_payment_id'],
