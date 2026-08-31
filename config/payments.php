@@ -37,6 +37,13 @@ return [
 
         'payu' => [
             'enabled' => env('PAYMENT_PAYU_ENABLED', false),
+            'environment' => env('PAYMENT_PAYU_ENVIRONMENT', 'sandbox'),
+            'client_id' => env('PAYU_CLIENT_ID'),
+            'client_secret' => env('PAYU_CLIENT_SECRET'),
+            'merchant_pos_id' => env('PAYU_MERCHANT_POS_ID'),
+            'second_key' => env('PAYU_SECOND_KEY'),
+            'notify_url' => env('PAYU_NOTIFY_URL'),
+            'continue_url' => env('PAYU_CONTINUE_URL'),
         ],
     ],
 
