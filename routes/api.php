@@ -8,7 +8,7 @@ use App\Http\Controllers\Api\V1\PaymentWebhookController;
 use App\Http\Controllers\Api\V1\RefundController;
 use Illuminate\Support\Facades\Route;
 
-Route::middleware('api.key')
+Route::middleware(['api.key', 'throttle:standard'])
     ->prefix('v1')
     ->group(function () {
         Route::get('/me', [ApiContextController::class, 'show'])
@@ -17,23 +17,27 @@ Route::middleware('api.key')
         Route::get('/payments', [PaymentController::class, 'index'])
             ->name('api.v1.payments.index');
 
-        Route::post('/payments', [PaymentController::class, 'store'])
-            ->name('api.v1.payments.store');
-
         Route::get('/payments/{reference}', [PaymentController::class, 'show'])
             ->name('api.v1.payments.show');
-
-        Route::post('/payments/{reference}/attempts', [PaymentAttemptController::class, 'store'])
-            ->name('api.v1.payments.attempts.store');
-
-        Route::post('/payments/{reference}/refunds', [RefundController::class, 'store'])
-            ->name('api.v1.payments.refunds.store');
 
         Route::get('/payments/{reference}/refunds', [RefundController::class, 'index'])
             ->name('api.v1.payments.refunds.index');
 
         Route::get('/payments/{reference}/refunds/{refundReference}', [RefundController::class, 'show'])
             ->name('api.v1.payments.refunds.show');
+    });
+
+Route::middleware(['api.key', 'throttle:sensitive'])
+    ->prefix('v1')
+    ->group(function () {
+        Route::post('/payments', [PaymentController::class, 'store'])
+            ->name('api.v1.payments.store');
+
+        Route::post('/payments/{reference}/attempts', [PaymentAttemptController::class, 'store'])
+            ->name('api.v1.payments.attempts.store');
+
+        Route::post('/payments/{reference}/refunds', [RefundController::class, 'store'])
+            ->name('api.v1.payments.refunds.store');
 
         Route::post('/payments/{reference}/attempts/{attempt}/execute', [PaymentAttemptController::class, 'execute'])
             ->name('api.v1.payments.attempts.execute');
@@ -43,9 +47,9 @@ Route::middleware('api.key')
     });
 
 /*
- * Provider webhooks — intentionally OUTSIDE the api.key middleware
- * group: callers are external payment providers, not merchant API
- * clients. Authentication happens via provider-specific verification
+ * Provider webhooks — intentionally OUTSIDE the api.key and throttle
+ * middleware groups: callers are external payment providers, not merchant
+ * API clients. Authentication happens via provider-specific verification
  * inside PaymentWebhookController.
  */
 Route::post('/v1/webhooks/{provider}', [PaymentWebhookController::class, 'handle'])

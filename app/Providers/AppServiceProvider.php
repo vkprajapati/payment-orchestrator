@@ -8,7 +8,10 @@ use App\Policies\ApiKeyPolicy;
 use App\Policies\MerchantPolicy;
 use App\Services\ApiKeys\ApiRequestContext;
 use App\Services\Merchants\CurrentMerchant;
+use Illuminate\Cache\RateLimiting\Limit;
+use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Gate;
+use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\Facades\View;
 use Illuminate\Support\ServiceProvider;
 use Illuminate\View\View as ViewFactory;
@@ -41,6 +44,38 @@ class AppServiceProvider extends ServiceProvider
             if (auth()->check()) {
                 $view->with('currentMerchant', app(CurrentMerchant::class)->get());
             }
+        });
+
+        $this->registerRateLimiters();
+    }
+
+    /**
+     * Register merchant-aware rate-limit buckets.
+     *
+     * Each callback returns a Limit whose values come from config so
+     * they can be tuned per-environment without code changes. The
+     * limiter key itself is resolved in ThrottleApiRequests from the
+     * authenticated merchant context — these callbacks only define
+     * the attempt budget and decay window.
+     *
+     * Buckets:
+     *   standard    — reads & ordinary API operations (generous)
+     *   sensitive   — state-changing writes (stricter)
+     */
+    private function registerRateLimiters(): void
+    {
+        RateLimiter::for('standard', function (Request $request, string $key): Limit {
+            $attempts = (int) config('rate_limiting.buckets.standard.max_attempts', 1200);
+            $decay = (int) config('rate_limiting.buckets.standard.decay_minutes', 1);
+
+            return Limit::perMinutes($decay, $attempts);
+        });
+
+        RateLimiter::for('sensitive', function (Request $request, string $key): Limit {
+            $attempts = (int) config('rate_limiting.buckets.sensitive.max_attempts', 60);
+            $decay = (int) config('rate_limiting.buckets.sensitive.decay_minutes', 1);
+
+            return Limit::perMinutes($decay, $attempts);
         });
     }
 }
