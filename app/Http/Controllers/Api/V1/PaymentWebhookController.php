@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Api\V1;
 
+use App\Actions\Payments\ReconcilePaymentWebhook;
 use App\Exceptions\PaymentProviderException;
 use App\Http\Controllers\Controller;
 use App\Services\Payments\PaymentWebhookManager;
@@ -19,11 +20,15 @@ use Throwable;
  *
  * Responses are deliberately generic: unknown providers get a 404,
  * verification failures get a 400 with the same body — no verification
- * details, no raw payload echoing, no secret material.
+ * details, no raw payload echoing, no secret material, and no indication
+ * of whether a matching payment attempt exists.
  */
 class PaymentWebhookController extends Controller
 {
-    public function __construct(private readonly PaymentWebhookManager $webhooks) {}
+    public function __construct(
+        private readonly PaymentWebhookManager $webhooks,
+        private readonly ReconcilePaymentWebhook $reconcile,
+    ) {}
 
     public function handle(Request $request, string $provider): JsonResponse
     {
@@ -50,14 +55,21 @@ class PaymentWebhookController extends Controller
                 return response()->json(['message' => 'Invalid webhook.'], 400);
             }
 
-            $webhookProvider->parseWebhook($payload, $headers);
+            $webhookResult = $webhookProvider->parseWebhook($payload, $headers);
+
+            if (! $webhookResult->valid) {
+                return response()->json(['message' => 'Invalid webhook.'], 400);
+            }
+
+            // Reconcile local PaymentAttempt / Payment state from the
+            // verified, parsed webhook. Unknown attempt IDs are ignored
+            // safely (no creation) and still acknowledged generically.
+            $this->reconcile->reconcile($webhookResult);
         } catch (Throwable) {
-            // Never leak provider internals; never update payments here.
+            // Never leak provider internals; never partially reconcile.
             return response()->json(['message' => 'Invalid webhook.'], 400);
         }
 
-        // Architecture step only: the parsed result is intentionally
-        // discarded — no payment status updates, no webhook persistence.
         return response()->json(['received' => true]);
     }
 }
