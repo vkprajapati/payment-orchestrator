@@ -126,7 +126,7 @@ class ReconcilePaymentWebhook
         return $current === $incoming;
     }
 
-/**
+    /**
      * Apply the attempt status transition.
      */
     private function applyTransition(

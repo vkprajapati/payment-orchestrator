@@ -4,7 +4,6 @@ use App\Actions\Payments\ReconcilePaymentWebhook;
 use App\Data\Payments\PaymentProviderWebhookResult;
 use App\Enums\PaymentAttemptStatus;
 use App\Enums\PaymentStatus;
-use App\Models\Merchant;
 use App\Models\Payment;
 use App\Models\PaymentAttempt;
 use Illuminate\Foundation\Testing\RefreshDatabase;

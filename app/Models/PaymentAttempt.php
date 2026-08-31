@@ -9,6 +9,7 @@ use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 
 /**
  * A single processing attempt of a Payment through one provider.
@@ -60,6 +61,15 @@ class PaymentAttempt extends Model
     public function merchant(): BelongsTo
     {
         return $this->belongsTo(Merchant::class);
+    }
+
+    /**
+     * Refunds associated with this attempt — i.e. refunds whose money is
+     * coming back through this provider pass.
+     */
+    public function refunds(): HasMany
+    {
+        return $this->hasMany(Refund::class);
     }
 
     /**

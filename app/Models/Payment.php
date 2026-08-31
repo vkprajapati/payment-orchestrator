@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use App\Enums\PaymentStatus;
+use App\Enums\RefundStatus;
 use Database\Factories\PaymentFactory;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
@@ -57,6 +58,14 @@ class Payment extends Model
     }
 
     /**
+     * The refunds issued against this payment.
+     */
+    public function refunds(): HasMany
+    {
+        return $this->hasMany(Refund::class);
+    }
+
+    /**
      * Determine whether the payment is awaiting processing.
      */
     public function isPending(): bool
@@ -86,6 +95,47 @@ class Payment extends Model
     public function isFailed(): bool
     {
         return $this->status === PaymentStatus::Failed;
+    }
+
+    /**
+     * Total amount currently reserved against this payment's refundable
+     * balance.
+     *
+     * Pending, processing and succeeded refunds consume the balance;
+     * failed and cancelled refunds release it. This single efficient
+     * aggregate query is the basis of over-refund protection.
+     */
+    public function totalRefundedAmount(): int
+    {
+        return (int) $this->refunds()
+            ->whereIn('status', RefundStatus::balanceReservingValues())
+            ->sum('amount');
+    }
+
+    /**
+     * Total amount of refunds that actually completed at a provider.
+     */
+    public function totalSuccessfulRefundAmount(): int
+    {
+        return (int) $this->refunds()
+            ->where('status', RefundStatus::Succeeded->value)
+            ->sum('amount');
+    }
+
+    /**
+     * The amount still available for new refunds.
+     */
+    public function remainingRefundableAmount(): int
+    {
+        return max(0, $this->amount - $this->totalRefundedAmount());
+    }
+
+    /**
+     * Determine whether any refund has been requested for this payment.
+     */
+    public function hasRefunds(): bool
+    {
+        return $this->refunds()->exists();
     }
 
     /**
