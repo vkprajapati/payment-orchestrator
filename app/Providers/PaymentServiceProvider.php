@@ -15,7 +15,9 @@ use App\Services\Payments\Providers\PayUPaymentProvider;
 use App\Services\Payments\Providers\Przelewy24PaymentProvider;
 use App\Services\Payments\Providers\RazorpayPaymentProvider;
 use App\Services\Payments\Providers\StripePaymentProvider;
+use Illuminate\Support\Facades\Config;
 use Illuminate\Support\ServiceProvider;
+use Stripe\StripeClient;
 
 /**
  * Registers the payment provider architecture.
@@ -71,6 +73,21 @@ class PaymentServiceProvider extends ServiceProvider
             }
 
             return $manager;
+        });
+
+        // Stripe API client: built from config, bound in the container so
+        // tests can swap a fake client. The binding keeps SDK construction
+        // OUT of the provider (which stays SDK-light and unit-testable).
+        // Not a singleton: a fresh client per resolution is cheap and
+        // avoids any reused connection state across requests/workers.
+        $this->app->bind('stripe.client', function (): StripeClient {
+            $secretKey = Config::get('payments.providers.stripe.secret_key');
+
+            if (! is_string($secretKey) || $secretKey === '') {
+                throw PaymentProviderException::notConfigured('stripe');
+            }
+
+            return new StripeClient($secretKey);
         });
 
         // Provider routing: the default resolver picks an explicit provider

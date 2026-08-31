@@ -77,8 +77,8 @@ class ProcessPaymentAttempt
                 providerPaymentId: null,
                 status: 'failed',
                 message: self::PROVIDER_FAILURE_MESSAGE,
-                metadata: [],
                 failureCode: 'provider_exception',
+                metadata: [],
             );
         }
 

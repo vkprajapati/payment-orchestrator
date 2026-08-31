@@ -40,6 +40,11 @@ class PaymentWebhookController extends Controller
             $request->headers->all(),
         );
 
+        // Stripe verifies signatures over the RAW request body, not a
+        // re-encoded JSON array. The raw body is forwarded under a
+        // reserved header key for providers that need it.
+        $headers['raw_body'] = $request->getContent();
+
         try {
             if (! $webhookProvider->verifyWebhook($payload, $headers)) {
                 return response()->json(['message' => 'Invalid webhook.'], 400);

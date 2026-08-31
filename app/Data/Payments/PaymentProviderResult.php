@@ -17,6 +17,7 @@ final readonly class PaymentProviderResult
      * @param  string|null  $providerPaymentId  the provider's own payment identifier
      * @param  string  $status  normalized lifecycle status (a PaymentStatus value)
      * @param  string|null  $message  safe, human-readable summary (never secrets)
+     * @param  string|null  $failureCode  safe, provider-agnostic failure code
      * @param  array<string, mixed>  $metadata  sanitized provider metadata
      */
     public function __construct(
@@ -25,6 +26,7 @@ final readonly class PaymentProviderResult
         public ?string $providerPaymentId,
         public string $status,
         public ?string $message = null,
+        public ?string $failureCode = null,
         public array $metadata = [],
     ) {}
 }

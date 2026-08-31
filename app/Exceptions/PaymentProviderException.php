@@ -38,4 +38,16 @@ final class PaymentProviderException extends Exception
     {
         return new self("Payment provider [{$provider}] does not support operation [{$operation}].");
     }
+
+    /**
+     * Thrown when a provider call fails in a controlled way.
+     *
+     * The message is deliberately generic — the underlying SDK/HTTP error
+     * may carry secrets or internal details and is only logged, never
+     * surfaced to API consumers.
+     */
+    public static function chargeFailed(string $provider): self
+    {
+        return new self("Payment provider [{$provider}] could not process the charge.");
+    }
 }
