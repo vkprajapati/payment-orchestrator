@@ -19,10 +19,13 @@ class ApiKeyFactory extends Factory
         // cannot be recovered. Tests that need to authenticate with a
         // known secret should use withRawKey() or the CreateApiKey action.
         $rawKey = CreateApiKey::KEY_PREFIX.Str::random(CreateApiKey::SECRET_LENGTH);
+        $reference = CreateApiKey::REFERENCE_PREFIX.(string) Str::ulid();
 
         return [
+            'reference' => $reference,
             'merchant_id' => MerchantFactory::new(),
             'name' => fake()->randomElement(['Production Server', 'Development', 'Mobile Application', 'CI/CD']),
+            'label' => fake()->optional()->word(),
             'key_prefix' => substr($rawKey, 0, CreateApiKey::STORED_PREFIX_LENGTH),
             'key_hash' => Hash::make($rawKey),
             'last_used_at' => null,

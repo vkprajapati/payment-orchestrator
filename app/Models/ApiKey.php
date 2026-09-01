@@ -8,8 +8,8 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
-#[Fillable(['merchant_id', 'name', 'key_prefix', 'key_hash', 'last_used_at', 'expires_at', 'revoked_at', 'metadata'])]
-#[Hidden(['key_hash'])]
+#[Fillable(['reference', 'label', 'name', 'key_prefix', 'key_hash', 'last_used_at', 'expires_at', 'revoked_at', 'metadata'])]
+#[Hidden(['key_hash', 'key_prefix'])]
 class ApiKey extends Model
 {
     use HasFactory;
@@ -64,5 +64,16 @@ class ApiKey extends Model
     public function isActive(): bool
     {
         return ! $this->isRevoked() && ! $this->isExpired();
+    }
+
+    /**
+     * Whether the authenticated merchant can use this key right now.
+     *
+     * Used by the API lifecycle endpoints to confirm the key is not
+     * revoked or expired, without exposing the reason on failure.
+     */
+    public function isAccessible(): bool
+    {
+        return $this->revoked_at === null && ($this->expires_at === null || $this->expires_at->isFuture());
     }
 }

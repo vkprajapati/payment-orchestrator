@@ -16,4 +16,6 @@ enum AuditEventName: string
     case PaymentCreated = 'payment.created';
     case PaymentProcessingRequested = 'payment.processing_requested';
     case RefundCreated = 'refund.created';
+    case ApiKeyCreated = 'api_key.created';
+    case ApiKeyRevoked = 'api_key.revoked';
 }

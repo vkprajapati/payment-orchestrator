@@ -3,6 +3,7 @@
 namespace App\Actions\ApiKeys;
 
 use App\Models\Merchant;
+use Carbon\CarbonInterface;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Str;
 
@@ -31,6 +32,13 @@ class CreateApiKey
     public const STORED_PREFIX_LENGTH = 16;
 
     /**
+     * Public reference prefix for API keys, consistent with the
+     * evt_/pay_/ref_ reference strategy used for audit events, payments,
+     * and refunds.
+     */
+    public const REFERENCE_PREFIX = 'key_';
+
+    /**
      * Create an API key for the given merchant.
      *
      * The raw key is generated with a cryptographically secure generator,
@@ -41,14 +49,22 @@ class CreateApiKey
      * candidate's key_hash — the high-entropy key makes brute force
      * attempts infeasible.
      */
-    public function create(Merchant $merchant, string $name): CreatedApiKey
-    {
+    public function create(
+        Merchant $merchant,
+        string $name,
+        ?string $label = null,
+        ?CarbonInterface $expiresAt = null,
+    ): CreatedApiKey {
         $rawKey = self::KEY_PREFIX.Str::random(self::SECRET_LENGTH);
+        $reference = self::REFERENCE_PREFIX.(string) Str::ulid();
 
         $apiKey = $merchant->apiKeys()->create([
+            'reference' => $reference,
             'name' => $name,
+            'label' => $label,
             'key_prefix' => substr($rawKey, 0, self::STORED_PREFIX_LENGTH),
             'key_hash' => Hash::make($rawKey),
+            'expires_at' => $expiresAt?->toDateTimeString(),
         ]);
 
         return new CreatedApiKey($apiKey, $rawKey);

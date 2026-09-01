@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\Api\V1\ApiContextController;
+use App\Http\Controllers\Api\V1\ApiKeyController;
 use App\Http\Controllers\Api\V1\AuditEventController;
 use App\Http\Controllers\Api\V1\PaymentAttemptController;
 use App\Http\Controllers\Api\V1\PaymentController;
@@ -43,6 +44,13 @@ Route::middleware(['api.key', 'throttle:standard'])
         Route::get('/audit-events/{reference}', [AuditEventController::class, 'show'])
             ->name('api.v1.audit-events.show');
 
+        // API key lifecycle — static before parameterized, reads on the
+        // cheap standard bucket; write mutations on sensitive.
+        Route::get('/api-keys', [ApiKeyController::class, 'index'])
+            ->name('api.v1.api-keys.index');
+        Route::get('/api-keys/{reference}', [ApiKeyController::class, 'show'])
+            ->name('api.v1.api-keys.show');
+
         Route::get('/payments', [PaymentController::class, 'index'])
             ->name('api.v1.payments.index');
 
@@ -73,6 +81,12 @@ Route::middleware(['api.key', 'throttle:sensitive'])
 
         Route::post('/payments/{reference}/process', [PaymentProcessingController::class, 'process'])
             ->name('api.v1.payments.process');
+
+        // API key lifecycle mutations — sensitive bucket.
+        Route::post('/api-keys', [ApiKeyController::class, 'store'])
+            ->name('api.v1.api-keys.store');
+        Route::post('/api-keys/{reference}/revoke', [ApiKeyController::class, 'revoke'])
+            ->name('api.v1.api-keys.revoke');
     });
 
 /*
