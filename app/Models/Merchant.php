@@ -52,4 +52,28 @@ class Merchant extends Model
     {
         return $this->hasMany(Payment::class);
     }
+
+    /**
+     * The idempotency reservations that belong to the merchant.
+     *
+     * Reservations are always created through this relation so merchant
+     * ownership is set server-side from the authenticated API key — the
+     * column is intentionally not fillable on the model.
+     */
+    public function idempotencyKeys(): HasMany
+    {
+        return $this->hasMany(IdempotencyKey::class);
+    }
+
+    /**
+     * The append-only audit trail that belongs to the merchant.
+     *
+     * Records are created only through this relation by the AuditLogger
+     * service, so ownership is always the authenticated merchant. There is
+     * intentionally no normal update or delete flow for audit records.
+     */
+    public function auditEvents(): HasMany
+    {
+        return $this->hasMany(AuditEvent::class);
+    }
 }

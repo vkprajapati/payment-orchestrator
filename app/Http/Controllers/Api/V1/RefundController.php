@@ -5,6 +5,8 @@ namespace App\Http\Controllers\Api\V1;
 use App\Actions\Api\HandleIdempotentRequest;
 use App\Actions\Payments\CreateRefund;
 use App\Actions\Payments\ProcessRefund;
+use App\Enums\AuditEventName;
+use App\Enums\AuditOutcome;
 use App\Exceptions\PaymentProviderException;
 use App\Exceptions\RefundNotProcessableException;
 use App\Http\Controllers\Controller;
@@ -13,6 +15,7 @@ use App\Http\Requests\Api\V1\ListRefundsRequest;
 use App\Http\Resources\Api\V1\RefundResource;
 use App\Models\Merchant;
 use App\Services\ApiKeys\ApiRequestContext;
+use App\Services\Audit\AuditLogger;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
 use InvalidArgumentException;
@@ -45,6 +48,7 @@ class RefundController extends Controller
         CreateRefund $createRefund,
         ProcessRefund $processRefund,
         HandleIdempotentRequest $idempotency,
+        AuditLogger $audit,
     ): JsonResponse {
         $merchant = $context->merchant();
 
@@ -57,12 +61,13 @@ class RefundController extends Controller
         // reuse for a different logical request is rejected with a
         // controlled 409. The reservation commits before the provider is
         // contacted, so no idempotency lock is ever held during provider
-        // HTTP calls.
+        // HTTP calls. Audit logging happens inside the closure, so a replay
+        // never duplicates the refund.created event.
         return $idempotency->wrap(
             $merchant,
             $request,
             $request->validated(),
-            fn (): JsonResponse => $this->performStore($reference, $request, $createRefund, $processRefund, $merchant),
+            fn (): JsonResponse => $this->performStore($reference, $request, $createRefund, $processRefund, $merchant, $audit),
         )->response;
     }
 
@@ -75,12 +80,16 @@ class RefundController extends Controller
         CreateRefund $createRefund,
         ProcessRefund $processRefund,
         Merchant $merchant,
+        AuditLogger $audit,
     ): JsonResponse {
         $payment = $merchant->payments()
             ->where('reference', $reference)
             ->first();
 
         if ($payment === null) {
+            // Unknown/cross-merchant reference: no audit record (see
+            // performProcess for the rationale — existence must not leak and
+            // probe noise must not pollute the authenticated merchant's trail).
             return response()->json(['message' => 'Not found.'], 404);
         }
 
@@ -90,6 +99,22 @@ class RefundController extends Controller
         try {
             $refund = $createRefund->createSafely($payment, $request->refundData());
         } catch (InvalidArgumentException $exception) {
+            // Controlled domain/validation failure (e.g. over-refund). Recorded
+            // as a failure outcome; the refund was never created.
+            $audit->log(
+                $merchant,
+                AuditEventName::RefundCreated,
+                $request->method(),
+                $request->path(),
+                outcome: AuditOutcome::Failure,
+                responseStatus: 422,
+                paymentReference: $payment->reference,
+                metadata: [
+                    'amount' => $request->validated('amount'),
+                    'currency' => $request->validated('currency') ?? $payment->currency,
+                ],
+            );
+
             return response()->json(['message' => $exception->getMessage()], 422);
         }
 
@@ -97,17 +122,54 @@ class RefundController extends Controller
             $refund = $processRefund->process($refund);
         } catch (RefundNotProcessableException $exception) {
             // The refund stays pending — no provider was executed.
+            $audit->log(
+                $merchant,
+                AuditEventName::RefundCreated,
+                $request->method(),
+                $request->path(),
+                outcome: AuditOutcome::Failure,
+                responseStatus: 409,
+                paymentReference: $payment->reference,
+                refundReference: $refund->reference,
+            );
+
             return response()->json([
                 'message' => $exception->getMessage(),
                 'data' => new RefundResource($refund->refresh()),
             ], 409);
         } catch (PaymentProviderException $exception) {
             // The refund stays pending — execution never started.
+            $audit->log(
+                $merchant,
+                AuditEventName::RefundCreated,
+                $request->method(),
+                $request->path(),
+                outcome: AuditOutcome::Failure,
+                responseStatus: 422,
+                paymentReference: $payment->reference,
+                refundReference: $refund->reference,
+            );
+
             return response()->json([
                 'message' => $exception->getMessage(),
                 'data' => new RefundResource($refund->refresh()),
             ], 422);
         }
+
+        $audit->log(
+            $merchant,
+            AuditEventName::RefundCreated,
+            $request->method(),
+            $request->path(),
+            outcome: AuditOutcome::Success,
+            responseStatus: 201,
+            paymentReference: $payment->reference,
+            refundReference: $refund->reference,
+            metadata: [
+                'amount' => $refund->amount,
+                'currency' => $refund->currency,
+            ],
+        );
 
         return response()->json(
             ['data' => new RefundResource($refund)],

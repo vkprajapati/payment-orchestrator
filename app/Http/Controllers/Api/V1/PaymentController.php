@@ -4,12 +4,15 @@ namespace App\Http\Controllers\Api\V1;
 
 use App\Actions\Api\HandleIdempotentRequest;
 use App\Actions\Payments\CreateIdempotentPayment;
+use App\Enums\AuditEventName;
+use App\Enums\AuditOutcome;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Api\V1\CreatePaymentRequest;
 use App\Http\Requests\Api\V1\ListPaymentsRequest;
 use App\Http\Resources\Api\V1\PaymentResource;
 use App\Models\Merchant;
 use App\Services\ApiKeys\ApiRequestContext;
+use App\Services\Audit\AuditLogger;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
 
@@ -34,6 +37,7 @@ class PaymentController extends Controller
         CreateIdempotentPayment $action,
         ApiRequestContext $context,
         HandleIdempotentRequest $idempotency,
+        AuditLogger $audit,
     ): JsonResponse {
         $merchant = $context->merchant();
 
@@ -47,7 +51,31 @@ class PaymentController extends Controller
             $merchant,
             $request,
             $request->validated(),
-            fn (): JsonResponse => $this->performStore($request, $action, $merchant),
+            function () use ($request, $action, $merchant, $audit): JsonResponse {
+                $response = $this->performStore($request, $action, $merchant);
+
+                // Audit happens INSIDE the idempotency closure so the
+                // payment.created event is recorded exactly once per
+                // execution. A replayed retry never reaches this closure and
+                // therefore cannot duplicate the audit record.
+                $status = $response->getStatusCode();
+
+                $audit->log(
+                    $merchant,
+                    AuditEventName::PaymentCreated,
+                    $request->method(),
+                    $request->path(),
+                    outcome: $status < 400 ? AuditOutcome::Success : AuditOutcome::Failure,
+                    responseStatus: $status,
+                    paymentReference: (string) ($response->getData(true)['data']['reference'] ?? ''),
+                    metadata: [
+                        'amount' => $request->validated('amount'),
+                        'currency' => $request->validated('currency'),
+                    ],
+                );
+
+                return $response;
+            },
         )->response;
     }
 
