@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\Api\V1\ApiContextController;
+use App\Http\Controllers\Api\V1\AuditEventController;
 use App\Http\Controllers\Api\V1\PaymentAttemptController;
 use App\Http\Controllers\Api\V1\PaymentController;
 use App\Http\Controllers\Api\V1\PaymentProcessingController;
@@ -13,6 +14,12 @@ Route::middleware(['api.key', 'throttle:standard'])
     ->group(function () {
         Route::get('/me', [ApiContextController::class, 'show'])
             ->name('api.v1.me');
+
+        Route::get('/audit-events', [AuditEventController::class, 'index'])
+            ->name('api.v1.audit-events.index');
+
+        Route::get('/audit-events/{reference}', [AuditEventController::class, 'show'])
+            ->name('api.v1.audit-events.show');
 
         Route::get('/payments', [PaymentController::class, 'index'])
             ->name('api.v1.payments.index');
