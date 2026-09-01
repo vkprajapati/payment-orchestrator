@@ -13,17 +13,27 @@ declare(strict_types=1);
 | so the caller can narrow the range. Exports are never silently
 | truncated, and the cap prevents unbounded memory consumption.
 |
-| retention.days — how long audit events are kept before they become
-| eligible for pruning (audit:prune command / daily scheduler entry).
-| Events strictly OLDER than the cutoff are removed; events exactly at
-| the cutoff are kept. The default of 365 days is a conservative,
-| compliance-friendly window for operational audit logs. Must be an
-| integer >= 1 — invalid values fail safely (the prune action throws and
-| the command reports a controlled error instead of deleting anything).
+| retention.days — the single retention window underpinning the two-stage
+| audit lifecycle:
+|   active → archived (soft-deleted) → permanently pruned
+| archive runs at 01:00 (audit:archive), prune at 02:00 (audit:prune).
+|   - Archive: active events strictly OLDER than the cutoff are archived
+|     (deleted_at set). Events exactly AT the cutoff are kept active.
+|   - Prune: archived events whose deleted_at (archive time) is strictly
+|     OLDER than the cutoff are permanently deleted. Because archival and
+|     pruning share the same window and run on the same day, an event
+|     archived at 01:00 is never prunable at 02:00 — it must wait a full
+|     additional retention window, guaranteeing the archive→prune grace
+|     period.
+| The default of 365 days is a conservative, compliance-friendly window
+| for operational audit logs. Must be an integer >= 1 — invalid values
+| fail safely (the actions throw and the commands report a controlled
+| error instead of archiving/pruning anything).
 |
-| retention.batch_size — maximum number of rows deleted per batch by the
-| pruning action. Bounded batches keep each delete short-lived (each
-| batch commits independently) and memory usage flat. Must be >= 1.
+| retention.batch_size — maximum number of rows processed per batch by the
+| archive and prune actions. Bounded batches keep each transaction
+| short-lived (each batch commits independently) and memory usage flat.
+| Must be >= 1.
 |
 */
 

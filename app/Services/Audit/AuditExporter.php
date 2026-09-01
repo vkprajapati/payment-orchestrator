@@ -67,8 +67,12 @@ class AuditExporter
     {
         // Start structurally from the merchant relation — the query already
         // carries the tenant constraint before any filter is applied.
+        // getQuery() exposes the base query builder BEFORE the SoftDeletes
+        // global scope is applied, so the active-row constraint is stated
+        // explicitly: archived events are never exported.
         $query = $merchant->auditEvents()
             ->getQuery()
+            ->whereNull('audit_events.deleted_at')
             ->filtered(
                 $request->eventFilter(),
                 $request->outcomeFilter(),

@@ -46,6 +46,34 @@ final class AuditRetention
     }
 
     /**
+     * The archive cutoff: active events older than this become archived
+     * (soft-deleted). Reuses the single retention window so lifecycle
+     * semantics never drift.
+     */
+    public static function archiveCutoff(?int $days = null): CarbonImmutable
+    {
+        return self::cutoff($days);
+    }
+
+    /**
+     * The prune cutoff: permanently deletes archived rows whose archive
+     * time (deleted_at) is strictly older than this. Because the archive
+     * job runs at 01:00 and prune at 02:00, an event archived at 01:00 has
+     * a deleted_at in the recent past — which is always newer than
+     * (now - retention_days), so it is NOT prunable at 02:00. Only events
+     * archived more than retention_days ago are eligible, guaranteeing the
+     * full archive→prune grace window.
+     *
+     * Reuses the single retention window; the cutoff timestamp semantics
+     * are shared, but the compared column differs (deleted_at vs
+     * performed_at) to enforce the two-stage lifecycle.
+     */
+    public static function pruneCutoff(?int $days = null): CarbonImmutable
+    {
+        return self::cutoff($days);
+    }
+
+    /**
      * Validate a configured/overridden value as a positive integer.
      * Environment variables arrive as strings, so numeric strings are
      * accepted; anything else (zero, negative, non-numeric) fails safely.

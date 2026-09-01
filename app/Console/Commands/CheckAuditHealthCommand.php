@@ -13,8 +13,9 @@ use Illuminate\Console\Command;
  * Security posture:
  *   - Read-only: never deletes or mutates audit data.
  *   - Aggregate-only output: health status, retention window, stale
- *     count, and newest-event age. Never merchant identifiers, event
- *     references, metadata, secrets, or internal exception details.
+ *     count, archived count, prune-eligible count, and event ages.
+ *     Never merchant identifiers, event references, metadata, secrets,
+ *     or internal exception details.
  *   - Never creates audit events (no recursion).
  *
  * Exit codes: SUCCESS when healthy, FAILURE when unhealthy — suitable
@@ -43,6 +44,7 @@ final class CheckAuditHealthCommand extends Command
     public function handle(GetAuditHealth $health): int
     {
         $result = $health->execute();
+        $checkedAt = $result->checkedAt;
 
         if ((bool) $this->option('json')) {
             // Machine-readable: the same strict whitelist as the API resource.
@@ -51,8 +53,11 @@ final class CheckAuditHealthCommand extends Command
                 'retention_config_valid' => $result->retentionConfigValid,
                 'retention_days' => $result->retentionDays,
                 'stale_events' => $result->staleCount,
+                'archived_events' => $result->archivedCount,
+                'prune_eligible_events' => $result->pruneEligibleCount,
                 'newest_event_at' => $result->newestEventAt?->toISOString(),
-                'checked_at' => $result->checkedAt->toISOString(),
+                'newest_archived_at' => $result->newestArchivedAt?->toISOString(),
+                'checked_at' => $checkedAt->toISOString(),
                 'reason' => $result->reason,
             ]));
         } else {
@@ -68,20 +73,35 @@ final class CheckAuditHealthCommand extends Command
             ));
 
             $this->line(sprintf(
-                'Events older than the retention cutoff: %s.',
+                'Events older than the archive cutoff: %s.',
                 $result->staleCount !== null ? (string) $result->staleCount : 'unknown',
             ));
 
             $this->line(sprintf(
-                'Newest audit event: %s.',
+                'Archived events: %s.',
+                $result->archivedCount !== null ? (string) $result->archivedCount : 'unknown',
+            ));
+
+            $this->line(sprintf(
+                'Permanently prunable events (exceeding second-stage window): %s.',
+                $result->pruneEligibleCount !== null ? (string) $result->pruneEligibleCount : 'unknown',
+            ));
+
+            $this->line(sprintf(
+                'Newest active audit event: %s.',
                 $result->newestEventAt?->format('Y-m-d H:i:s') ?? 'none',
+            ));
+
+            $this->line(sprintf(
+                'Newest archived audit event: %s.',
+                $result->newestArchivedAt?->format('Y-m-d H:i:s') ?? 'none',
             ));
 
             if ($result->reason !== null) {
                 $this->line(sprintf('Reason: %s.', $result->reason));
             }
 
-            $this->line(sprintf('Checked at: %s.', $result->checkedAt->format('Y-m-d H:i:s')));
+            $this->line(sprintf('Checked at: %s.', $checkedAt->format('Y-m-d H:i:s')));
         }
 
         return $result->healthy ? Command::SUCCESS : Command::FAILURE;

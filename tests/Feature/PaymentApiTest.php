@@ -188,9 +188,12 @@ it('replays the original payment for the same merchant and idempotency key', fun
     $second = $this->postJson('/api/v1/payments', $payload, $headers);
 
     $first->assertCreated()->assertHeader('Idempotent-Replayed', 'false');
-    $second->assertOk()->assertHeader('Idempotent-Replayed', 'true');
+    // The retry replays the exact stored response: same 201 status, same
+    // body, same payment — the domain operation is never executed twice.
+    $second->assertCreated()->assertHeader('Idempotent-Replayed', 'true');
 
     expect($second->json('data.reference'))->toBe($first->json('data.reference'))
+        ->and($second->json())->toBe($first->json())
         ->and(Payment::count())->toBe(1);
 });
 
@@ -207,19 +210,21 @@ it('isolates idempotency keys per merchant', function () {
         ->and(Payment::count())->toBe(2);
 });
 
-it('returns the original payment when the key is reused with different request data', function () {
+it('rejects a key reused with a different request payload', function () {
     [, $rawKey] = paymentApiKey(paymentApiMerchant());
     $headers = paymentAuthHeader($rawKey) + ['Idempotency-Key' => 'order-123'];
 
-    $first = $this->postJson('/api/v1/payments', ['amount' => 1000, 'currency' => 'USD'], $headers)->assertCreated();
+    $this->postJson('/api/v1/payments', ['amount' => 1000, 'currency' => 'USD'], $headers)->assertCreated();
 
-    // Version 1: request bodies are not fingerprinted — the original
-    // payment is replayed even though the amount differs.
-    $second = $this->postJson('/api/v1/payments', ['amount' => 5000, 'currency' => 'USD'], $headers)->assertOk();
+    // The same key with a DIFFERENT logical request must never execute:
+    // controlled conflict, no duplicate payment, no hash leakage.
+    $second = $this->postJson('/api/v1/payments', ['amount' => 5000, 'currency' => 'USD'], $headers);
 
-    expect($second->json('data.reference'))->toBe($first->json('data.reference'))
-        ->and($second->json('data.amount'))->toBe(1000)
-        ->and(Payment::count())->toBe(1);
+    $second->assertStatus(409)
+        ->assertJson(['message' => 'Idempotency key has already been used with a different request.']);
+
+    expect(Payment::count())->toBe(1)
+        ->and($second->json('data'))->toBeNull();
 });
 
 it('never lets the request body override the authenticated merchant', function () {

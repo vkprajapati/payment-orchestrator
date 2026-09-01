@@ -35,6 +35,28 @@ final class GetAuditHealth
 {
     /**
      * Run one health check.
+     *
+     * Computes the archive cutoff (active events older than this should
+     * have been archived) and the prune cutoff (archived events older
+     * than this are eligible for permanent deletion). Both use the shared
+     * AuditRetention service so the window never drifts from PruneAuditEvents.
+     *
+     * Query plan (exactly 4 bounded aggregates, no row hydration):
+     *   1. COUNT active rows with performed_at < archive cutoff (stale)
+     *   2. COUNT active rows with performed_at >= archive cutoff (recent-ish)
+     *   3. MAX(performed_at) over active rows (newest active event)
+     *   4. MAX(deleted_at) over archived rows (newest archived event)
+     *
+     * A 5th, optional aggregate is issued when a prune cutoff is in scope
+     * to count archived rows eligible for permanent deletion. All are
+     * COUNT/MAX-only — the audit table is never loaded row-by-row.
+     *
+     * Failures are fail-safe: an invalid configuration or a database error
+     * never throws — they are reported as unhealthy with a coarse reason
+     * marker. Internal details, merchant identifiers, and audit contents
+     * are never included.
+     *
+     * Health reads never create audit events — no AuditLogger usage.
      */
     public function execute(): AuditHealthResult
     {
@@ -43,12 +65,16 @@ final class GetAuditHealth
         $retentionConfigValid = true;
         $retentionDays = null;
         $staleCount = null;
+        $archivedCount = null;
+        $pruneEligibleCount = null;
         $newestEventAt = null;
+        $newestArchivedAt = null;
         $reason = null;
 
         try {
             $retentionDays = AuditRetention::days();
-            $cutoff = AuditRetention::cutoff($retentionDays);
+            $archiveCutoff = AuditRetention::archiveCutoff($retentionDays);
+            $pruneCutoff = AuditRetention::pruneCutoff($retentionDays);
         } catch (InvalidAuditRetentionException) {
             $retentionConfigValid = false;
             $reason = 'retention_config_invalid';
@@ -56,26 +82,47 @@ final class GetAuditHealth
 
         if ($retentionConfigValid) {
             try {
-                // Strict cutoff: performed_at < cutoff — exactly the rows
-                // PruneAuditEvents would delete. Aggregates only.
+                // Active (non-archived) events strictly older than the
+                // archive cutoff — these should be 0 after archiving.
                 $staleCount = (int) AuditEvent::query()
-                    ->where('performed_at', '<', $cutoff)
+                    ->where('performed_at', '<', $archiveCutoff)
                     ->count();
 
-                // max() returns a raw scalar (or null) — no model hydration.
+                // Newest active event (no pagination — just a MAX scalar).
                 $maxPerformedAt = AuditEvent::query()->max('performed_at');
                 $newestEventAt = $maxPerformedAt !== null
                     ? CarbonImmutable::parse($maxPerformedAt)
                     : null;
+
+                // Archived event aggregate counts.
+                $archivedCount = (int) AuditEvent::query()
+                    ->onlyTrashed()
+                    ->count();
+
+                $pruneEligibleCount = (int) AuditEvent::query()
+                    ->onlyTrashed()
+                    ->where('deleted_at', '<', $pruneCutoff)
+                    ->count();
+
+                // Newest archived event (by archive time).
+                $maxDeletedAt = AuditEvent::query()
+                    ->onlyTrashed()
+                    ->max('deleted_at');
+                $newestArchivedAt = $maxDeletedAt !== null
+                    ? CarbonImmutable::parse($maxDeletedAt)
+                    : null;
             } catch (QueryException) {
                 // Fail safely: the database problem itself is never exposed.
                 $staleCount = null;
+                $archivedCount = null;
+                $pruneEligibleCount = null;
                 $newestEventAt = null;
+                $newestArchivedAt = null;
                 $reason = 'database_unavailable';
             }
         }
 
-        if ($reason === null && $staleCount > 0) {
+        if ($reason === null && $staleCount !== null && $staleCount > 0) {
             $reason = 'stale_events_present';
         }
 
@@ -84,7 +131,10 @@ final class GetAuditHealth
             retentionConfigValid: $retentionConfigValid,
             retentionDays: $retentionDays,
             staleCount: $staleCount,
+            archivedCount: $archivedCount,
+            pruneEligibleCount: $pruneEligibleCount,
             newestEventAt: $newestEventAt,
+            newestArchivedAt: $newestArchivedAt,
             checkedAt: $checkedAt,
             reason: $reason,
         );

@@ -1,6 +1,7 @@
 <?php
 
 use App\Actions\ApiKeys\CreateApiKey;
+use App\Actions\Audit\ArchiveAuditEvents;
 use App\Actions\Audit\PruneAuditEvents;
 use App\Enums\AuditEventName;
 use App\Enums\AuditOutcome;
@@ -463,13 +464,22 @@ it('regression: pruning still works and interacts correctly with metrics', funct
 
     expect(auditMetricsGet($rawKey)->json('data.total'))->toBe(2);
 
+    // Two-stage lifecycle: the stale event must be archived first — archive
+    // alone already excludes it from ordinary (active-row) metrics queries.
+    app(ArchiveAuditEvents::class)->execute(retentionDays: 30);
+
+    expect(auditMetricsGet($rawKey)->json('data.total'))->toBe(1);
+
+    // Prune only affects archived rows beyond the grace window; the freshly
+    // archived row survives, and metrics remain unchanged.
     app(PruneAuditEvents::class)->execute(retentionDays: 30);
 
     $data = auditMetricsGet($rawKey)->assertOk()->json('data');
 
     expect($data['total'])->toBe(1)
         ->and($data['by_event'])->toBe([AuditEventName::PaymentCreated->value => 1])
-        ->and($data['time_range']['from'])->toBe(now()->startOfSecond()->toISOString());
+        ->and($data['time_range']['from'])->toBe(now()->startOfSecond()->toISOString())
+        ->and(AuditEvent::withTrashed()->count())->toBe(2); // nothing hard-deleted yet
 });
 
 it('regression: payment flow audit logging still feeds metrics', function () {

@@ -83,6 +83,8 @@
         .badge-status-active { background: rgba(22, 163, 74, .1); color: var(--success); }
         .badge-status-suspended { background: rgba(220, 38, 38, .1); color: var(--danger); }
         .badge-status-inactive { background: rgba(100, 116, 139, .12); color: var(--text-secondary); }
+        .badge-status-pending { background: rgba(217, 119, 6, .12); color: var(--warning); }
+        .badge-status-info { background: rgba(2, 132, 199, .1); color: var(--info); }
         .profile-dropdown { position: relative; display: inline-block; }
         .profile-menu {
             display: none;
@@ -107,6 +109,12 @@
             text-align: left;
         }
         .profile-menu form button:hover { background-color: var(--background); }
+        .alert { border-width: 1px; }
+        .alert-success { background: rgba(22, 163, 74, .08); border-color: rgba(22, 163, 74, .25); color: #14532d; }
+        .alert-danger { background: rgba(220, 38, 38, .08); border-color: rgba(220, 38, 38, .25); color: #7f1d1d; }
+        .alert-warning { background: rgba(217, 119, 6, .08); border-color: rgba(217, 119, 6, .25); color: #78350f; }
+        .alert-info { background: rgba(2, 132, 199, .08); border-color: rgba(2, 132, 199, .25); color: #0c4a6e; }
+        .spinner-border { vertical-align: middle; }
     </style>
 </head>
 <body>

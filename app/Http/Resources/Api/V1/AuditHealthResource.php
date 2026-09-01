@@ -29,7 +29,10 @@ class AuditHealthResource extends JsonResource
             'retention_config_valid' => $this->retentionConfigValid,
             'retention_days' => $this->retentionDays,
             'stale_events' => $this->staleCount,
+            'archived_events' => $this->archivedCount,
+            'prune_eligible_events' => $this->pruneEligibleCount,
             'newest_event_at' => $this->newestEventAt?->toISOString(),
+            'newest_archived_at' => $this->newestArchivedAt?->toISOString(),
             'checked_at' => $this->checkedAt->toISOString(),
             'reason' => $this->reason,
         ];

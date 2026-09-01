@@ -76,4 +76,17 @@ class Merchant extends Model
     {
         return $this->hasMany(AuditEvent::class);
     }
+
+    /**
+     * The refunds that belong to the merchant.
+     *
+     * Refunds are always created through a payment of this merchant (the
+     * merchant_id column is set server-side from the payment's owner), so
+     * this inverse relation can never cross the tenant boundary — useful
+     * for merchant-scoped aggregates such as the dashboard summary.
+     */
+    public function refunds(): HasMany
+    {
+        return $this->hasMany(Refund::class);
+    }
 }

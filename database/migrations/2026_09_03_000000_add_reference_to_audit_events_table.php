@@ -1,8 +1,8 @@
 <?php
 
-use App\Models\AuditEvent;
 use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
 
@@ -25,8 +25,15 @@ return new class extends Migration
         // Backfill any pre-existing rows (the original table shipped without
         // a public identifier) so the column can be enforced NOT NULL
         // unconditionally going forward.
-        foreach (AuditEvent::query()->whereNull('reference')->cursor() as $event) {
-            $event->forceFill(['reference' => 'evt_'.Str::ulid()])->save();
+        //
+        // Use the raw query builder (not the AuditEvent model) so this
+        // migration stays independent of the model's current state — the
+        // model may apply a SoftDeletes global scope (deleted_at) that does
+        // not exist until a later migration.
+        foreach (DB::table('audit_events')->whereNull('reference')->cursor() as $row) {
+            DB::table('audit_events')
+                ->where('id', $row->id)
+                ->update(['reference' => 'evt_'.Str::ulid()]);
         }
 
         Schema::table('audit_events', function (Blueprint $table) {

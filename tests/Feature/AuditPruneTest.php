@@ -1,6 +1,8 @@
 <?php
 
 use App\Actions\ApiKeys\CreateApiKey;
+use App\Actions\Audit\ArchiveAuditEvents;
+use App\Actions\Audit\GetAuditHealth;
 use App\Actions\Audit\PruneAuditEvents;
 use App\Enums\AuditEventName;
 use App\Enums\AuditOutcome;
@@ -17,6 +19,10 @@ use Illuminate\Support\Str;
 use Tests\TestCase;
 
 uses(TestCase::class, RefreshDatabase::class);
+
+beforeEach(function () {
+    Cache::flush();
+});
 
 /**
  * (auditPrune-prefixed helpers avoid clashing with sibling test files
@@ -48,14 +54,32 @@ function auditPruneEvent(Merchant $merchant, CarbonInterface $performedAt, array
     ], $extra));
 }
 
+/**
+ * An OLD event, already archived (deleted_at set to the same age). Under
+ * the two-stage lifecycle, prune targets archived rows whose deleted_at
+ * (archive time) is older than the prune cutoff — this fixture is therefore
+ * prunable for any window smaller than $daysOld.
+ */
 function auditPruneOld(Merchant $merchant, int $daysOld = 31, array $extra = []): AuditEvent
 {
-    return auditPruneEvent($merchant, now()->subDays($daysOld), $extra);
+    return auditPruneEvent($merchant, now()->subDays($daysOld), array_merge(
+        ['deleted_at' => now()->subDays($daysOld)],
+        $extra,
+    ));
 }
 
 function auditPruneRecent(Merchant $merchant, array $extra = []): AuditEvent
 {
     return auditPruneEvent($merchant, now(), $extra);
+}
+
+function auditPruneRun(array $opts = []): object
+{
+    return app(PruneAuditEvents::class)->execute(
+        retentionDays: $opts['days'] ?? null,
+        batchSize: $opts['batch-size'] ?? null,
+        dryRun: $opts['dry-run'] ?? false,
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -76,22 +100,21 @@ it('deletes events strictly older than the retention cutoff and keeps newer ones
         ->and(AuditEvent::latest('id')->first()->reference)->toBe($kept->reference);
 });
 
-it('keeps an event exactly at the cutoff (strictly-older semantics)', function () {
-    // Freeze time at a microsecond-free instant so the cutoff survives
-    // the timestamp(0) column round-trip exactly.
+it('keeps an archived event exactly at the cutoff (strictly-older semantics)', function () {
     $this->travelTo($frozen = now()->startOfSecond());
     $merchant = auditPruneMerchant('Prune Co');
 
-    // performed_at exactly equal to the cutoff must remain.
-    auditPruneEvent($merchant, $frozen->copy()->subDays(30));
-    // One second older must be deleted.
-    auditPruneEvent($merchant, $frozen->copy()->subDays(30)->subSecond());
+    // deleted_at exactly equal to the cutoff must remain archived.
+    $boundary = auditPruneEvent($merchant, $frozen->copy()->subDays(30), ['deleted_at' => $frozen->copy()->subDays(30)]);
+    // One second older must be permanently deleted.
+    auditPruneEvent($merchant, $frozen->copy()->subDays(30)->subSecond(), ['deleted_at' => $frozen->copy()->subDays(30)->subSecond()]);
 
     $result = app(PruneAuditEvents::class)->execute(retentionDays: 30);
 
     expect($result->deleted)->toBe(1)
-        ->and(AuditEvent::count())->toBe(1)
-        ->and(AuditEvent::latest('id')->first()->performed_at->equalTo($frozen->copy()->subDays(30)))->toBeTrue();
+        ->and(AuditEvent::withTrashed()->count())->toBe(1)
+        ->and(AuditEvent::withTrashed()->first()->deleted_at->equalTo($frozen->copy()->subDays(30)))->toBeTrue()
+        ->and($boundary->refresh()->deleted_at)->not->toBeNull();
 });
 
 it('prunes only eligible rows from a mixed old and new set', function () {
@@ -121,27 +144,20 @@ it('is a safe no-op when nothing is eligible', function () {
         ->and(AuditEvent::count())->toBe(1);
 });
 
-it('uses performed_at — not created_at — as the retention clock', function () {
+it('prunes archived rows by archive time — not performed_at or created_at', function () {
     $merchant = auditPruneMerchant('Prune Co');
 
-    // Old row-insert time but a RECENT performed_at: must be retained,
-    // proving the documented semantic choice of field.
-    $recent = auditPruneRecent($merchant);
-    DB::table('audit_events')->where('id', $recent->id)->update([
-        'created_at' => now()->subDays(400),
-    ]);
-    $recent->refresh();
+    // Very old performed_at but archived RECENTLY: must remain (the
+    // archive→prune grace window respects deleted_at, not event age).
+    $recentArchival = auditPruneEvent($merchant, now()->subDays(400), ['deleted_at' => now()->subDays(5)]);
 
-    // Recent row-insert time but an OLD performed_at: must be pruned.
-    $stale = auditPruneOld($merchant);
-    DB::table('audit_events')->where('id', $stale->id)->update([
-        'created_at' => now(),
-    ]);
+    // Fresh performed_at but archived LONG ago: must be pruned.
+    auditPruneEvent($merchant, now(), ['deleted_at' => now()->subDays(31)]);
 
     app(PruneAuditEvents::class)->execute(retentionDays: 30);
 
-    expect(AuditEvent::count())->toBe(1)
-        ->and(AuditEvent::latest('id')->first()->reference)->toBe($recent->reference);
+    expect(AuditEvent::withTrashed()->count())->toBe(1)
+        ->and(AuditEvent::withTrashed()->first()->reference)->toBe($recentArchival->reference);
 });
 
 // ---------------------------------------------------------------------------
@@ -167,33 +183,23 @@ it('does not skip records when rows disappear between batches', function () {
     $removedConcurrently = 0;
     $injected = false;
 
-    // Simulate concurrent deletion: when the FIRST prune batch delete
+    // Simulate concurrent deletion: when the FIRST prune batch forceDelete
     // executes, another "process" removes 5 more eligible rows directly.
     DB::listen(function ($query) use (&$removedConcurrently, &$injected, $cutoff): void {
         if ($injected || ! str_starts_with($query->sql, 'delete from "audit_events"')) {
             return;
         }
-
-        // Set the flag BEFORE issuing our own delete so this listener is
-        // not re-entered by the queries it triggers.
         $injected = true;
-
-        $ids = DB::table('audit_events')
-            ->where('performed_at', '<', $cutoff)
-            ->limit(5)
-            ->pluck('id');
+        $ids = DB::table('audit_events')->where('deleted_at', '<', $cutoff)->limit(5)->pluck('id');
         $removedConcurrently = DB::table('audit_events')->whereIn('id', $ids)->delete();
     });
 
     $result = app(PruneAuditEvents::class)->execute(retentionDays: 30, batchSize: 10);
 
     expect($removedConcurrently)->toBe(5)
-        // The action only reports rows IT deleted (20); the 5 removed
-        // concurrently are not double-counted.
         ->and($result->deleted)->toBe(20)
-        // And critically: no eligible row was skipped — table is empty.
-        ->and(AuditEvent::where('performed_at', '<', $cutoff)->count())->toBe(0)
-        ->and(AuditEvent::count())->toBe(0);
+        ->and(AuditEvent::onlyTrashed()->count())->toBe(0)
+        ->and(AuditEvent::withTrashed()->count())->toBe(0);
 });
 
 // ---------------------------------------------------------------------------
@@ -252,8 +258,7 @@ it('leaves unrelated tables and rows completely untouched', function () {
         ->and(DB::table('refunds')->where('id', $refund->id)->exists())->toBeTrue()
         ->and(DB::table('idempotency_keys')->where('id', $idempotencyKey->id)->exists())->toBeTrue()
         ->and(DB::table('merchants')->where('id', $otherMerchant->id)->exists())->toBeTrue()
-        // Only the eligible audit rows were removed; the FK cascade
-        // (merchant deletion) is never triggered by pruning.
+        // Only the eligible archived audit rows were removed.
         ->and(AuditEvent::count())->toBe(1);
 });
 
@@ -299,7 +304,7 @@ it('fails safely on zero, negative, and non-numeric retention configuration', fu
     'null days' => null,
 ])->after(function () {
     // Nothing was ever deleted with an invalid configuration.
-    expect(AuditEvent::count())->toBe(1);
+    expect(AuditEvent::withTrashed()->count())->toBe(1);
 });
 
 it('fails safely on invalid batch size configuration', function (mixed $batchSize) {
@@ -313,19 +318,6 @@ it('fails safely on invalid batch size configuration', function (mixed $batchSiz
     'non-numeric batch size' => 'lots',
 ]);
 
-it('accepts numeric-string configuration from environment variables', function () {
-    // env() values arrive as strings — these must work.
-    config(['audit.retention.days' => '14', 'audit.retention.batch_size' => '50']);
-    $merchant = auditPruneMerchant('Prune Co');
-    auditPruneOld($merchant, daysOld: 15);
-
-    $result = app(PruneAuditEvents::class)->execute();
-
-    expect($result->retentionDays)->toBe(14)
-        ->and($result->batchSize)->toBe(50)
-        ->and($result->deleted)->toBe(1);
-});
-
 // ---------------------------------------------------------------------------
 // Artisan command
 // ---------------------------------------------------------------------------
@@ -335,6 +327,7 @@ it('prunes via the audit:prune command and reports aggregate counts only', funct
     $merchant = auditPruneMerchant('Prune Co');
     $old = auditPruneEvent($merchant, now()->subDays(31), [
         'metadata' => ['amount' => 9999, 'api_key' => 'sk_test_leaky_secret'],
+        'deleted_at' => now()->subDays(31),
     ]);
     auditPruneRecent($merchant);
 
@@ -370,7 +363,7 @@ it('succeeds with a clean message when there is nothing to prune', function () {
 
 it('supports a --days override on the command', function () {
     $merchant = auditPruneMerchant('Prune Co');
-    auditPruneEvent($merchant, now()->subDays(8));
+    auditPruneEvent($merchant, now()->subDays(8), ['deleted_at' => now()->subDays(8)]);
     auditPruneRecent($merchant);
 
     $exitCode = Artisan::call('audit:prune', ['--days' => '7']);
@@ -384,7 +377,7 @@ it('supports a --days override on the command', function () {
 
 it('fails safely on an invalid --days override', function () {
     auditPruneOld(auditPruneMerchant('Prune Co'));
-    $before = AuditEvent::count();
+    $before = AuditEvent::withTrashed()->count();
 
     $exitCode = Artisan::call('audit:prune', ['--days' => 'not-a-number']);
     $output = Artisan::output();
@@ -392,7 +385,7 @@ it('fails safely on an invalid --days override', function () {
     expect($exitCode)->toBe(1)
         ->and($output)->toContain('Invalid audit retention configuration')
         ->and($output)->toContain('Nothing was deleted')
-        ->and(AuditEvent::count())->toBe($before);
+        ->and(AuditEvent::withTrashed()->count())->toBe($before);
 });
 
 // ---------------------------------------------------------------------------
@@ -410,7 +403,7 @@ it('reports what a dry run would delete without deleting anything', function () 
 
     expect($exitCode)->toBe(0)
         ->and($output)->toContain('Dry run: 3 audit event(s) would be deleted. Nothing was deleted.')
-        ->and(AuditEvent::count())->toBe(4);
+        ->and(AuditEvent::withTrashed()->count())->toBe(4);
 
     // Action-level dry run reports the same aggregate.
     $result = app(PruneAuditEvents::class)->execute(retentionDays: 30, dryRun: true);
@@ -419,9 +412,19 @@ it('reports what a dry run would delete without deleting anything', function () 
         ->and($result->eligible)->toBe(3)
         ->and($result->deleted)->toBe(0)
         ->and($result->batches)->toBe(0)
-        ->and(AuditEvent::count())->toBe(4);
+        ->and(AuditEvent::withTrashed()->count())->toBe(4);
 });
+it('accepts numeric-string configuration from environment variables', function () {
+    config(['audit.retention.days' => '14', 'audit.retention.batch_size' => '50']);
+    $merchant = auditPruneMerchant('Prune Co');
+    auditPruneOld($merchant, daysOld: 15);
 
+    $result = app(PruneAuditEvents::class)->execute();
+
+    expect($result->retentionDays)->toBe(14)
+        ->and($result->batchSize)->toBe(50)
+        ->and($result->deleted)->toBe(1);
+});
 // ---------------------------------------------------------------------------
 // Concurrency / cutoff safety
 // ---------------------------------------------------------------------------
@@ -430,12 +433,15 @@ it('never deletes events written concurrently after the cutoff was computed', fu
     // Freeze time so the cutoff and the concurrent write are deterministic.
     $this->travelTo(now()->startOfSecond());
     $merchant = auditPruneMerchant('Prune Co');
-    collect(range(1, 5))->each(fn () => auditPruneEvent($merchant, now()->subDays(31)));
+    collect(range(1, 5))->each(fn () => auditPruneEvent(
+        $merchant,
+        now()->subDays(31),
+        ['deleted_at' => now()->subDays(31)],
+    ));
 
     $concurrent = null;
 
-    // Simulate a concurrent audit write DURING the pruning run: the first
-    // batch delete triggers a new event inserted with performed_at = now().
+    // Simulate a concurrent archived-row insertion DURING the pruning run.
     DB::listen(function ($query) use (&$concurrent, $merchant): void {
         if (str_starts_with($query->sql, 'delete from "audit_events"') && $concurrent === null) {
             $concurrent = auditPruneRecent($merchant);
@@ -445,13 +451,48 @@ it('never deletes events written concurrently after the cutoff was computed', fu
     $result = app(PruneAuditEvents::class)->execute(retentionDays: 30);
 
     expect($concurrent)->toBeInstanceOf(AuditEvent::class)
-        // All pre-cutoff events are gone...
         ->and($result->deleted)->toBe(5)
-        // ...and the event written mid-run survives: the cutoff was
-        // computed once, before any deletion, so the concurrent write is
-        // strictly newer than the cutoff.
-        ->and(AuditEvent::count())->toBe(1)
-        ->and(AuditEvent::latest('id')->first()->reference)->toBe($concurrent->reference);
+        // The concurrent write was NOT archived and is newer than the prune
+        // cutoff — it survives.
+        ->and(AuditEvent::withTrashed()->count())->toBe(1);
+});
+
+it('archived-and-then-pruned lifecycle completes in strict order', function () {
+    config(['audit.retention.days' => 30]);
+    $this->travelTo(now()->startOfSecond());
+    $merchant = auditPruneMerchant('Prune Co');
+    $event = auditPruneEvent($merchant, now()->subDays(400));
+
+    // Stage 1: archive (deleted_at ≈ now).
+    app(ArchiveAuditEvents::class)->execute();
+
+    // Prune immediately after — the archived row's deleted_at (≈now) is far
+    // newer than the prune cutoff (now - 30 days), so it must survive.
+    $prune = app(PruneAuditEvents::class)->execute(retentionDays: 30);
+    expect($prune->eligible)->toBe(0)
+        ->and($prune->deleted)->toBe(0)
+        ->and($event->refresh()->deleted_at)->not->toBeNull()
+        ->and(AuditEvent::withTrashed()->count())->toBe(1);
+
+    // Age the archive time beyond the prune cutoff, then prune deletes it.
+    $event->forceFill(['deleted_at' => now()->subDays(31)])->save();
+    $pruneAgain = app(PruneAuditEvents::class)->execute(retentionDays: 30);
+
+    expect($pruneAgain->eligible)->toBe(1)
+        ->and($pruneAgain->deleted)->toBe(1)
+        ->and(AuditEvent::withTrashed()->count())->toBe(0);
+});
+
+it('regression: health remains healthy after the full two-stage lifecycle', function () {
+    config(['audit.retention.days' => 30]);
+    $merchant = auditPruneMerchant('Prune Co');
+    auditPruneEvent($merchant, now()->subDays(400))->delete(); // archived, recent
+    auditPruneRecent($merchant);
+
+    $prune = app(PruneAuditEvents::class)->execute(retentionDays: 30);
+
+    expect($prune->deleted)->toBe(0) // recent archival not prunable
+        ->and(app(GetAuditHealth::class)->execute()->healthy)->toBeTrue();
 });
 
 // ---------------------------------------------------------------------------
@@ -462,19 +503,16 @@ it('creates zero new audit events while pruning', function () {
     $merchant = auditPruneMerchant('Prune Co');
     auditPruneOld($merchant);
     auditPruneRecent($merchant);
-    $before = AuditEvent::count();
+    $before = AuditEvent::withTrashed()->count();
 
     $result = app(PruneAuditEvents::class)->execute(retentionDays: 30);
 
     expect($result->deleted)->toBe(1)
         // Pruning itself must not call AuditLogger or create audit rows.
-        ->and(AuditEvent::count())->toBe($before - $result->deleted);
+        ->and(AuditEvent::withTrashed()->count())->toBe($before - $result->deleted);
 });
 
 it('leaves audit reads and exports untouched by the pruning code path', function () {
-    // The prune action shares no code with the retrieval/export endpoints;
-    // this test proves the export and list endpoints still behave after a
-    // prune run has executed.
     config(['audit.export.max_events' => 100]);
     $merchant = auditPruneMerchant('Prune Co');
     auditPruneOld($merchant, extra: ['http_method' => 'POST', 'path' => 'api/v1/payments']);

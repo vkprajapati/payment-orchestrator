@@ -74,11 +74,17 @@ final class GetAuditMetrics
      * Fresh merchant-scoped, filtered query builder for each aggregate.
      * The query always starts from the merchant relation — the tenant
      * constraint exists before any aggregation is applied.
+     *
+     * getQuery() exposes the base query builder BEFORE the SoftDeletes
+     * global scope is applied, so the active-row constraint (deleted_at IS
+     * NULL — archived events are excluded from merchant-facing aggregates)
+     * is stated explicitly here.
      */
     private function filteredQuery(Merchant $merchant, ListAuditEventsRequest $request): Builder
     {
         return $merchant->auditEvents()
             ->getQuery()
+            ->whereNull('audit_events.deleted_at')
             ->filtered(
                 $request->eventFilter(),
                 $request->outcomeFilter(),

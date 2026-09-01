@@ -35,4 +35,18 @@ return [
         ],
     ],
 
+    /*
+    |--------------------------------------------------------------------------
+    | Internal V1 API
+    |--------------------------------------------------------------------------
+    | Base URL used by the frontend API client (App\Services\Api\ApiClient)
+    | when it consumes the key-authenticated public contract. Defaults to the
+    | application URL so first-party pages can target the same install; the
+    | client always authenticates with a merchant API key supplied by the
+    | caller — no service secret is stored here.
+    */
+    'api' => [
+        'base_url' => env('API_BASE_URL', env('APP_URL', 'http://localhost')),
+    ],
+
 ];
