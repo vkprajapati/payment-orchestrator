@@ -2,13 +2,14 @@
 
 namespace App\Models;
 
+use App\Enums\ApiKeyScope;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Attributes\Hidden;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
-#[Fillable(['reference', 'label', 'name', 'key_prefix', 'key_hash', 'last_used_at', 'expires_at', 'revoked_at', 'metadata'])]
+#[Fillable(['reference', 'label', 'name', 'key_prefix', 'key_hash', 'last_used_at', 'expires_at', 'revoked_at', 'metadata', 'scopes'])]
 #[Hidden(['key_hash', 'key_prefix'])]
 class ApiKey extends Model
 {
@@ -34,7 +35,23 @@ class ApiKey extends Model
             'expires_at' => 'datetime',
             'revoked_at' => 'datetime',
             'metadata' => 'array',
+            'scopes' => 'array',
         ];
+    }
+
+    /**
+     * Whether the key holds the given scope.
+     *
+     * A NULL scopes value (rows that predate per-key scopes and were not
+     * backfilled) means full access — existing integrations must never
+     * silently lose permissions. Backfilled and newly created rows carry
+     * explicit scope lists.
+     */
+    public function hasScope(string $scope): bool
+    {
+        $scopes = $this->scopes ?? ApiKeyScope::values();
+
+        return in_array($scope, $scopes, true);
     }
 
     /**

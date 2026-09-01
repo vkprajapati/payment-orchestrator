@@ -100,6 +100,7 @@ class ApiKeyController extends Controller
                     $request->name(),
                     $request->label(),
                     $expiresAt,
+                    $request->scopes(),
                 );
 
                 $this->auditLogger->log(
@@ -226,6 +227,11 @@ class ApiKeyController extends Controller
                         $merchant,
                         $key->name,
                         $key->label,
+                        null,
+                        // Exact scope inheritance: rotation must never
+                        // escalate or silently drop permissions. A legacy
+                        // NULL value keeps its full-access semantics.
+                        $key->scopes,
                     );
 
                     // Revocation is idempotent; a revoked_at timestamp is

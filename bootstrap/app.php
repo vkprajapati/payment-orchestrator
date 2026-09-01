@@ -3,6 +3,7 @@
 use App\Exceptions\InvalidApiKeyException;
 use App\Exceptions\PaymentProviderException;
 use App\Http\Middleware\AuthenticateApiKey;
+use App\Http\Middleware\EnsureApiKeyScope;
 use App\Http\Middleware\EnsureCurrentMerchant;
 use App\Http\Middleware\ThrottleApiRequests;
 use Illuminate\Foundation\Application;
@@ -21,6 +22,7 @@ return Application::configure(basePath: dirname(__DIR__))
         $middleware->alias([
             'merchant' => EnsureCurrentMerchant::class,
             'api.key' => AuthenticateApiKey::class,
+            'scope' => EnsureApiKeyScope::class,
             'throttle' => ThrottleApiRequests::class,
         ]);
     })

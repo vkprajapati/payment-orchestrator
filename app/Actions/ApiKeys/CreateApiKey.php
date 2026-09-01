@@ -2,6 +2,7 @@
 
 namespace App\Actions\ApiKeys;
 
+use App\Enums\ApiKeyScope;
 use App\Models\Merchant;
 use Carbon\CarbonInterface;
 use Illuminate\Support\Facades\Hash;
@@ -54,6 +55,7 @@ class CreateApiKey
         string $name,
         ?string $label = null,
         ?CarbonInterface $expiresAt = null,
+        ?array $scopes = null,
     ): CreatedApiKey {
         $rawKey = self::KEY_PREFIX.Str::random(self::SECRET_LENGTH);
         $reference = self::REFERENCE_PREFIX.(string) Str::ulid();
@@ -65,6 +67,9 @@ class CreateApiKey
             'key_prefix' => substr($rawKey, 0, self::STORED_PREFIX_LENGTH),
             'key_hash' => Hash::make($rawKey),
             'expires_at' => $expiresAt?->toDateTimeString(),
+            // Omitted scopes mean full access (Step 11.1 compatibility):
+            // the full current scope set is persisted explicitly.
+            'scopes' => $scopes ?? ApiKeyScope::values(),
         ]);
 
         return new CreatedApiKey($apiKey, $rawKey);

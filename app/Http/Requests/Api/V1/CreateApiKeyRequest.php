@@ -4,8 +4,11 @@ declare(strict_types=1);
 
 namespace App\Http\Requests\Api\V1;
 
+use App\Enums\ApiKeyScope;
+use Closure;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Support\Str;
+use Illuminate\Validation\Rule;
 
 class CreateApiKeyRequest extends FormRequest
 {
@@ -28,6 +31,21 @@ class CreateApiKeyRequest extends FormRequest
             'name' => ['required', 'string', 'max:255'],
             'label' => ['nullable', 'string', 'max:255'],
             'expires_at' => ['nullable', 'date_format:Y-m-d', 'after_or_equal:today'],
+            // Explicit scope allow-list. Duplicates are rejected (not
+            // silently normalized) so the merchant's intent is unambiguous.
+            // Omitted scopes create a full-access key (Step 11.1
+            // compatibility); an explicitly EMPTY array is rejected — a
+            // key with no permissions has no legitimate use.
+            'scopes' => [
+                'nullable', 'array', 'min:1',
+                function (string $attribute, mixed $value, Closure $fail): void {
+                    if (is_array($value)
+                        && count($value) !== count(array_unique($value))) {
+                        $fail('The scopes field contains duplicate values.');
+                    }
+                },
+            ],
+            'scopes.*' => ['string', Rule::in(ApiKeyScope::values())],
         ];
     }
 
@@ -66,5 +84,15 @@ class CreateApiKeyRequest extends FormRequest
     public function expiresAt(): ?string
     {
         return $this->validated('expires_at');
+    }
+
+    /**
+     * The validated optional scope list (null = full access default).
+     *
+     * @return list<string>|null
+     */
+    public function scopes(): ?array
+    {
+        return $this->validated('scopes');
     }
 }

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Http\Resources\Api\V1;
 
+use App\Enums\ApiKeyScope;
 use App\Models\ApiKey;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
@@ -28,6 +29,7 @@ class ApiKeyResource extends JsonResource
             'reference' => $this->reference,
             'name' => $this->name,
             'label' => $this->label,
+            'scopes' => $this->scopes ?? ApiKeyScope::values(),
             'status' => $this->revoked_at !== null
                 ? 'revoked'
                 : ($this->isExpired() ? 'expired' : 'active'),

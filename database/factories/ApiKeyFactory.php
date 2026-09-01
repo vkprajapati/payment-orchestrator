@@ -3,6 +3,7 @@
 namespace Database\Factories;
 
 use App\Actions\ApiKeys\CreateApiKey;
+use App\Enums\ApiKeyScope;
 use App\Models\ApiKey;
 use Illuminate\Database\Eloquent\Factories\Factory;
 use Illuminate\Support\Facades\Hash;
@@ -26,6 +27,9 @@ class ApiKeyFactory extends Factory
             'merchant_id' => MerchantFactory::new(),
             'name' => fake()->randomElement(['Production Server', 'Development', 'Mobile Application', 'CI/CD']),
             'label' => fake()->optional()->word(),
+            // Full access by default, mirroring the production action when
+            // scopes are omitted.
+            'scopes' => ApiKeyScope::values(),
             'key_prefix' => substr($rawKey, 0, CreateApiKey::STORED_PREFIX_LENGTH),
             'key_hash' => Hash::make($rawKey),
             'last_used_at' => null,
