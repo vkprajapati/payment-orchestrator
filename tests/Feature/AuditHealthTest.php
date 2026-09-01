@@ -1,6 +1,7 @@
 <?php
 
 use App\Actions\ApiKeys\CreateApiKey;
+use App\Actions\Audit\ArchiveAuditEvents;
 use App\Actions\Audit\GetAuditHealth;
 use App\Actions\Audit\PruneAuditEvents;
 use App\Data\Audit\AuditHealthResult;
@@ -131,6 +132,102 @@ it('uses strict cutoff semantics consistent with pruning', function () {
 });
 
 // ---------------------------------------------------------------------------
+// Lifecycle metrics
+// ---------------------------------------------------------------------------
+
+it('distinguishes active and archived counts in the health result', function () {
+    config(['audit.retention.days' => 30]);
+    $merchant = auditHealthMerchant();
+
+    $staleOld = auditHealthEvent($merchant, ['performed_at' => now()->subDays(400)]); // stale + will be archived
+    auditHealthEvent($merchant); // recent active
+    $stale = auditHealthEvent($merchant, ['performed_at' => now()->subDays(31)]);
+
+    $result = auditHealthCheck();
+
+    expect($result->staleCount)->toBe(2)
+        ->and($result->archivedCount)->toBe(0)
+        ->and($result->pruneEligibleCount)->toBe(0);
+
+    // Archive the stale events.
+    $staleOld->delete(); // soft-delete = simulated/actual archive
+    $stale->delete();
+
+    $after = auditHealthCheck();
+
+    expect($after->staleCount)->toBe(0)
+        ->and($after->archivedCount)->toBe(2);
+});
+
+it('reports prune-eligible count for archived events older than twice the window', function () {
+    config(['audit.retention.days' => 30]);
+    $this->travelTo(now()->startOfSecond());
+
+    $merchant = auditHealthMerchant();
+    $old = auditHealthEvent($merchant, ['performed_at' => now()->subDays(400)]);
+    $recent = auditHealthEvent($merchant, ['performed_at' => now()->subDays(31)]);
+
+    $old->delete(); // archive: deleted_at ≈ now
+
+    $result = auditHealthCheck();
+
+    // Prune cutoff = now - 30 days. The archived event's deleted_at (≈now)
+    // is NOT older than the prune cutoff, so 0 prune-eligible.
+    expect($result->archivedCount)->toBe(1)
+        ->and($result->pruneEligibleCount)->toBe(0);
+
+    // Manually age the archive time beyond the prune cutoff.
+    $old->forceFill(['deleted_at' => now()->subDays(31)])->save();
+
+    $re = auditHealthCheck();
+
+    expect($re->archivedCount)->toBe(1)
+        ->and($re->pruneEligibleCount)->toBe(1);
+});
+
+it('reports newest active and archived timestamps independently', function () {
+    config(['audit.retention.days' => 30]);
+    $merchant = auditHealthMerchant();
+
+    $recent = auditHealthEvent($merchant, ['performed_at' => now()->subDay()]);
+    $archived = auditHealthEvent($merchant, ['performed_at' => now()->subDays(31), 'deleted_at' => now()->subDay()]);
+
+    $result = auditHealthCheck();
+
+    expect($result->newestEventAt?->toISOString())->toBe($recent->performed_at->toISOString())
+        ->and($result->newestArchivedAt?->toISOString())->toBe($archived->deleted_at->toISOString());
+});
+
+it('reports null archived metrics for a table with no archived events', function () {
+    $result = auditHealthCheck();
+
+    expect($result->archivedCount)->toBe(0)
+        ->and($result->pruneEligibleCount)->toBe(0)
+        ->and($result->newestArchivedAt)->toBeNull()
+        ->and($result->newestEventAt)->toBeNull();
+});
+
+it('aggregates archived events across multiple merchants without leaking merchant data', function () {
+    config(['audit.retention.days' => 30]);
+
+    $mA = auditHealthMerchant('Merchant A');
+    $mB = auditHealthMerchant('Merchant B');
+
+    $oldA = auditHealthEvent($mA, ['performed_at' => now()->subDays(400)]);
+    $oldB = auditHealthEvent($mB, ['performed_at' => now()->subDays(400)]);
+    auditHealthEvent($mA); // recent active
+
+    $oldA->delete();
+    $oldB->delete();
+
+    $result = auditHealthCheck();
+
+    expect($result->archivedCount)->toBe(2)
+        ->and($result->staleCount)->toBe(0)
+        ->and($result->healthy)->toBeTrue();
+});
+
+// ---------------------------------------------------------------------------
 // Action — fail-safe behavior
 // ---------------------------------------------------------------------------
 
@@ -190,7 +287,7 @@ it('exits successfully and prints aggregates when healthy', function () {
     expect($exitCode)->toBe(0)
         ->and($output)->toContain('Audit health: HEALTHY')
         ->and($output)->toContain('Retention configuration: valid')
-        ->and($output)->toContain('Events older than the retention cutoff: 0')
+        ->and($output)->toContain('Events older than the archive cutoff: 0')
         // Aggregate-only: never event references or merchant identity.
         ->and($output)->not->toContain('evt_')
         ->and($output)->not->toContain('pay_')
@@ -206,7 +303,7 @@ it('exits with failure and a coarse reason when stale events exist', function ()
 
     expect($exitCode)->toBe(1)
         ->and($output)->toContain('Audit health: UNHEALTHY')
-        ->and($output)->toContain('Events older than the retention cutoff: 1')
+        ->and($output)->toContain('Events older than the archive cutoff: 1')
         ->and($output)->toContain('Reason: stale_events_present');
 });
 
@@ -234,7 +331,9 @@ it('emits machine-readable JSON output on request', function () {
         ->and($decoded)->toBeArray()
         ->and(array_keys($decoded))->toBe([
             'healthy', 'retention_config_valid', 'retention_days',
-            'stale_events', 'newest_event_at', 'checked_at', 'reason',
+            'stale_events', 'archived_events', 'prune_eligible_events',
+            'newest_event_at', 'newest_archived_at',
+            'checked_at', 'reason',
         ])
         ->and($decoded['healthy'])->toBeTrue()
         ->and($decoded['stale_events'])->toBe(0)
@@ -281,7 +380,9 @@ it('exposes only the whitelisted health fields', function () {
 
     expect(array_keys($data))->toBe([
         'healthy', 'retention_config_valid', 'retention_days',
-        'stale_events', 'newest_event_at', 'checked_at', 'reason',
+        'stale_events', 'archived_events', 'prune_eligible_events',
+        'newest_event_at', 'newest_archived_at',
+        'checked_at', 'reason',
     ])->and($data['healthy'])->toBeFalse()
         ->and($data['stale_events'])->toBe(1)
         ->and($data['reason'])->toBe('stale_events_present');
@@ -369,11 +470,13 @@ it('aggregates health with bounded queries and no row loading', function () {
 
     auditHealthCheck();
 
-    // Exactly two audit_events queries: the stale COUNT and the newest MAX.
-    expect(count($selects))->toBe(2);
+    // Exactly five audit_events queries: stale COUNT, active MAX,
+    // archived COUNT, prune-eligible COUNT, archived MAX — all aggregates,
+    // all no row hydration.
+    expect(count($selects))->toBe(5);
 
     foreach ($selects as $sql) {
-        expect(str_contains($sql, 'count(*)') || str_contains(strtolower($sql), 'max('))
+        expect(str_contains(strtolower($sql), 'count(*)') || str_contains(strtolower($sql), 'max('))
             ->toBeTrue("Non-aggregate audit_events select executed: {$sql}");
     }
 });
@@ -391,13 +494,21 @@ it('regression: pruning resolves the stale condition health reports', function (
     expect(auditHealthCheck()->healthy)->toBeFalse()
         ->and(auditHealthCheck()->staleCount)->toBe(1);
 
+    // Two-stage lifecycle: stale active events must be archived first,
+    // then prune permanently removes the archived rows.
+    app(ArchiveAuditEvents::class)->execute();
+
+    expect(auditHealthCheck()->staleCount)->toBe(0)
+        ->and(auditHealthCheck()->archivedCount)->toBe(1)
+        ->and(AuditEvent::withTrashed()->count())->toBe(2);
+
     app(PruneAuditEvents::class)->execute(retentionDays: 30);
 
-    $result = auditHealthCheck();
-
-    expect($result->healthy)->toBeTrue()
-        ->and($result->staleCount)->toBe(0)
-        ->and($result->newestEventAt?->startOfSecond()->toISOString())->toBe(now()->startOfSecond()->toISOString());
+    // Grace window: the row was archived moments ago, so its deleted_at is
+    // far newer than the prune cutoff — prune must NOT delete it yet.
+    expect(auditHealthCheck()->staleCount)->toBe(0)
+        ->and(auditHealthCheck()->archivedCount)->toBe(1)
+        ->and(AuditEvent::withTrashed()->count())->toBe(2); // recent active + archived row retained
 });
 
 it('regression: metrics and retrieval endpoints remain unaffected', function () {
