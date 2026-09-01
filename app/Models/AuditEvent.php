@@ -33,6 +33,27 @@ class AuditEvent extends Model
     }
 
     /**
+     * Apply the shared public filter set (event, outcome, performed_at
+     * window) used by both the list and export endpoints. Values are
+     * validated against the enum whitelists before reaching this scope,
+     * and the merchant scope is always supplied by the caller's query —
+     * nothing here can weaken tenant isolation.
+     */
+    public function scopeFiltered(
+        Builder $query,
+        ?string $event,
+        ?string $outcome,
+        ?string $from,
+        ?string $to,
+    ): Builder {
+        return $query
+            ->when($event !== null, fn (Builder $q): Builder => $q->where('event', $event))
+            ->when($outcome !== null, fn (Builder $q): Builder => $q->where('outcome', $outcome))
+            ->when($from !== null, fn (Builder $q): Builder => $q->where('performed_at', '>=', $from))
+            ->when($to !== null, fn (Builder $q): Builder => $q->where('performed_at', '<=', $to));
+    }
+
+    /**
      * Get the attributes that should be cast.
      *
      * @return array<string, string>

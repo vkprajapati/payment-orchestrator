@@ -49,11 +49,24 @@ class ListAuditEventsRequest extends FormRequest
      */
     public function rules(): array
     {
+        return array_merge([
+            'per_page' => ['nullable', 'integer', 'min:1', 'max:100'],
+        ], $this->filterRules());
+    }
+
+    /**
+     * The shared filter rules used by both the list and the export
+     * endpoint (the export request extends this one and reuses them
+     * verbatim, so filter semantics can never drift apart).
+     *
+     * @return array<string, array<int|string>>
+     */
+    public function filterRules(): array
+    {
         $eventValues = array_column(AuditEventName::cases(), 'value');
         $outcomeValues = array_column(AuditOutcome::cases(), 'value');
 
         return [
-            'per_page' => ['nullable', 'integer', 'min:1', 'max:100'],
             'event' => ['nullable', 'string', Rule::in($eventValues)],
             'outcome' => ['nullable', 'string', Rule::in($outcomeValues)],
             'from' => ['nullable', 'date'],

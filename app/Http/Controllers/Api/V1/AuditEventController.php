@@ -2,12 +2,16 @@
 
 namespace App\Http\Controllers\Api\V1;
 
+use App\Exceptions\AuditExportTooLargeException;
 use App\Http\Controllers\Controller;
+use App\Http\Requests\Api\V1\ExportAuditEventsRequest;
 use App\Http\Requests\Api\V1\ListAuditEventsRequest;
 use App\Http\Resources\Api\V1\AuditEventResource;
 use App\Models\Merchant;
 use App\Services\ApiKeys\ApiRequestContext;
+use App\Services\Audit\AuditExporter;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
+use Symfony\Component\HttpFoundation\Response;
 
 class AuditEventController extends Controller
 {
@@ -27,26 +31,40 @@ class AuditEventController extends Controller
         $merchant = $this->authenticatedMerchant($context);
 
         $query = $merchant->auditEvents()
+            ->filtered(
+                $request->eventFilter(),
+                $request->outcomeFilter(),
+                $request->from(),
+                $request->to(),
+            )
             ->orderByDesc('created_at')
             ->orderByDesc('id');
 
-        if ($request->eventFilter() !== null) {
-            $query->where('event', $request->eventFilter());
-        }
-
-        if ($request->outcomeFilter() !== null) {
-            $query->where('outcome', $request->outcomeFilter());
-        }
-
-        if ($request->from() !== null) {
-            $query->where('performed_at', '>=', $request->from());
-        }
-
-        if ($request->to() !== null) {
-            $query->where('performed_at', '<=', $request->to());
-        }
-
         return AuditEventResource::collection($query->paginate($request->perPage()));
+    }
+
+    /**
+     * Export the authenticated merchant's audit events as JSON or CSV.
+     *
+     * The controller stays thin: merchant resolution, shared filter
+     * semantics (via the AuditEvent::filtered scope), then the exporter
+     * service owns size protection and safe rendering. Reads never create
+     * audit events — no recursion.
+     */
+    public function export(
+        ExportAuditEventsRequest $request,
+        ApiRequestContext $context,
+        AuditExporter $exporter,
+    ): Response {
+        $merchant = $this->authenticatedMerchant($context);
+
+        try {
+            return $exporter->export($merchant, $request);
+        } catch (AuditExportTooLargeException $exception) {
+            // Controlled client error — no partial export, no internal
+            // row counts, just guidance to narrow the range.
+            return response()->json(['message' => $exception->getMessage()], 422);
+        }
     }
 
     /**

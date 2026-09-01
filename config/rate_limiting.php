@@ -19,6 +19,9 @@ declare(strict_types=1);
 |               generous limits; tenant-isolated per merchant.
 |   sensitive — state-changing writes (create payment, process payment,
 |               create refund). Stricter limits to protect against abuse.
+|   export    — expensive read operations (audit log export). Strict
+|               limits because a single request can scan and stream a
+|               large number of rows.
 |   unauthenticated — conservative fallback for requests that reach the
 |               rate-limiting layer without a valid merchant context
 |               (invalid/missing API key). IP-based, privacy-safe, and
@@ -45,6 +48,11 @@ return [
             'max_attempts' => 60,
             'decay_minutes' => 1,
             'key_prefix' => 'sensitive',
+        ],
+        'export' => [
+            'max_attempts' => 30,
+            'decay_minutes' => 1,
+            'key_prefix' => 'export',
         ],
     ],
 

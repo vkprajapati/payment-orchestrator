@@ -9,6 +9,16 @@ use App\Http\Controllers\Api\V1\PaymentWebhookController;
 use App\Http\Controllers\Api\V1\RefundController;
 use Illuminate\Support\Facades\Route;
 
+// Audit export gets its own rate-limit bucket (expensive read). It is
+// registered BEFORE the /audit-events/{reference} route so "export" is
+// never captured as a reference.
+Route::middleware(['api.key', 'throttle:export'])
+    ->prefix('v1')
+    ->group(function () {
+        Route::get('/audit-events/export', [AuditEventController::class, 'export'])
+            ->name('api.v1.audit-events.export');
+    });
+
 Route::middleware(['api.key', 'throttle:standard'])
     ->prefix('v1')
     ->group(function () {

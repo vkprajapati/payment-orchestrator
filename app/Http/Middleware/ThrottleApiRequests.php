@@ -61,12 +61,16 @@ class ThrottleApiRequests
 
         $response = $next($request);
 
-        return $response instanceof Response
-            ? $response->withHeaders([
+        if ($response instanceof Response) {
+            // headers->add() (not withHeaders()) so streamed responses such
+            // as CSV exports also receive rate-limit headers.
+            $response->headers->add([
                 'X-RateLimit-Limit' => $limit->maxAttempts,
                 'X-RateLimit-Remaining' => RateLimiter::remaining($key, $limit->maxAttempts),
-            ])
-            : $response;
+            ]);
+        }
+
+        return $response;
     }
 
     /**

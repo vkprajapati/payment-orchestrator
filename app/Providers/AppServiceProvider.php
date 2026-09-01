@@ -77,5 +77,12 @@ class AppServiceProvider extends ServiceProvider
 
             return Limit::perMinutes($decay, $attempts);
         });
+
+        RateLimiter::for('export', function (Request $request, string $key): Limit {
+            $attempts = (int) config('rate_limiting.buckets.export.max_attempts', 30);
+            $decay = (int) config('rate_limiting.buckets.export.decay_minutes', 1);
+
+            return Limit::perMinutes($decay, $attempts);
+        });
     }
 }
