@@ -87,6 +87,8 @@ Route::middleware(['api.key', 'throttle:sensitive'])
             ->name('api.v1.api-keys.store');
         Route::post('/api-keys/{reference}/revoke', [ApiKeyController::class, 'revoke'])
             ->name('api.v1.api-keys.revoke');
+        Route::post('/api-keys/{reference}/rotate', [ApiKeyController::class, 'rotate'])
+            ->name('api.v1.api-keys.rotate');
     });
 
 /*
