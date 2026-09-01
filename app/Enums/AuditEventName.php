@@ -18,5 +18,6 @@ enum AuditEventName: string
     case RefundCreated = 'refund.created';
     case ApiKeyCreated = 'api_key.created';
     case ApiKeyRevoked = 'api_key.revoked';
-    case ApiKeyRotated = 'api_key.rotated';
+        case ApiKeyRotated = 'api_key.rotated';
+    case ApiKeyScopesUpdated = 'api_key.scopes_updated';
 }
