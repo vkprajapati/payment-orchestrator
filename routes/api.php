@@ -28,6 +28,12 @@ Route::middleware(['api.key', 'throttle:standard'])
         Route::get('/audit-events', [AuditEventController::class, 'index'])
             ->name('api.v1.audit-events.index');
 
+        // Metrics is a cheap aggregate read: it stays on the standard
+        // bucket (no dedicated bucket justified) and is registered BEFORE
+        // /audit-events/{reference} so "metrics" is never a reference.
+        Route::get('/audit-events/metrics', [AuditEventController::class, 'metrics'])
+            ->name('api.v1.audit-events.metrics');
+
         Route::get('/audit-events/{reference}', [AuditEventController::class, 'show'])
             ->name('api.v1.audit-events.show');
 

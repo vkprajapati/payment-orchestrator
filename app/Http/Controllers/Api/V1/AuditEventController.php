@@ -2,11 +2,14 @@
 
 namespace App\Http\Controllers\Api\V1;
 
+use App\Actions\Audit\GetAuditMetrics;
 use App\Exceptions\AuditExportTooLargeException;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Api\V1\ExportAuditEventsRequest;
+use App\Http\Requests\Api\V1\GetAuditMetricsRequest;
 use App\Http\Requests\Api\V1\ListAuditEventsRequest;
 use App\Http\Resources\Api\V1\AuditEventResource;
+use App\Http\Resources\Api\V1\AuditMetricsResource;
 use App\Models\Merchant;
 use App\Services\ApiKeys\ApiRequestContext;
 use App\Services\Audit\AuditExporter;
@@ -65,6 +68,25 @@ class AuditEventController extends Controller
             // row counts, just guidance to narrow the range.
             return response()->json(['message' => $exception->getMessage()], 422);
         }
+    }
+
+    /**
+     * Aggregate operational metrics for the authenticated merchant's
+     * audit events.
+     *
+     * Thin: merchant resolution, then the GetAuditMetrics action owns the
+     * aggregate queries (database count/group-by/min-max only — no row
+     * hydration) and the shared filtered scope keeps semantics identical
+     * to list and export. Reads never create audit events — no recursion.
+     */
+    public function metrics(
+        GetAuditMetricsRequest $request,
+        ApiRequestContext $context,
+        GetAuditMetrics $action,
+    ): AuditMetricsResource {
+        $merchant = $this->authenticatedMerchant($context);
+
+        return new AuditMetricsResource($action->execute($merchant, $request));
     }
 
     /**
