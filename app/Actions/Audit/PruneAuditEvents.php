@@ -6,7 +6,7 @@ namespace App\Actions\Audit;
 
 use App\Exceptions\InvalidAuditRetentionException;
 use App\Models\AuditEvent;
-use Carbon\CarbonImmutable;
+use App\Services\Audit\AuditRetention;
 
 /**
  * Operational retention for audit events.
@@ -60,20 +60,20 @@ final class PruneAuditEvents
         ?int $batchSize = null,
         bool $dryRun = false,
     ): PruneAuditEventsResult {
-        $days = $this->positiveInt(
+        $days = AuditRetention::positiveInt(
             $retentionDays ?? config('audit.retention.days'),
             'audit.retention.days',
             'retention window (days)',
         );
 
-        $batchSize = $this->positiveInt(
+        $batchSize = AuditRetention::positiveInt(
             $batchSize ?? config('audit.retention.batch_size'),
             'audit.retention.batch_size',
             'batch size',
         );
 
-        // Computed exactly once per run.
-        $cutoff = CarbonImmutable::instance(now()->subDays($days));
+        // Computed exactly once per run (shared, strict cutoff semantics).
+        $cutoff = AuditRetention::cutoff($days);
 
         $eligible = AuditEvent::query()
             ->where('performed_at', '<', $cutoff)
@@ -117,29 +117,5 @@ final class PruneAuditEvents
             batches: $batches,
             dryRun: $dryRun,
         );
-    }
-
-    /**
-     * Validate a configured/overridden value as a positive integer.
-     * Environment variables arrive as strings, so numeric strings are
-     * accepted; anything else (zero, negative, non-numeric) fails safely.
-     *
-     * @throws InvalidAuditRetentionException
-     */
-    private function positiveInt(mixed $value, string $configKey, string $label): int
-    {
-        if (is_string($value) && preg_match('/^\d+$/', $value) === 1) {
-            $value = (int) $value;
-        }
-
-        if (! is_int($value) || $value < 1) {
-            throw new InvalidAuditRetentionException(sprintf(
-                'Invalid audit retention configuration: %s must be a positive integer (at least 1) for the %s setting. Nothing was deleted.',
-                $label,
-                $configKey,
-            ));
-        }
-
-        return $value;
     }
 }

@@ -34,6 +34,12 @@ Route::middleware(['api.key', 'throttle:standard'])
         Route::get('/audit-events/metrics', [AuditEventController::class, 'metrics'])
             ->name('api.v1.audit-events.metrics');
 
+        // Health is a global, aggregate-only operational read (same cheap
+        // standard bucket), registered BEFORE /audit-events/{reference}
+        // so "health" is never a reference.
+        Route::get('/audit-events/health', [AuditEventController::class, 'health'])
+            ->name('api.v1.audit-events.health');
+
         Route::get('/audit-events/{reference}', [AuditEventController::class, 'show'])
             ->name('api.v1.audit-events.show');
 

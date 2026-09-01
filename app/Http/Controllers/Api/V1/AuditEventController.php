@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Api\V1;
 
+use App\Actions\Audit\GetAuditHealth;
 use App\Actions\Audit\GetAuditMetrics;
 use App\Exceptions\AuditExportTooLargeException;
 use App\Http\Controllers\Controller;
@@ -9,6 +10,7 @@ use App\Http\Requests\Api\V1\ExportAuditEventsRequest;
 use App\Http\Requests\Api\V1\GetAuditMetricsRequest;
 use App\Http\Requests\Api\V1\ListAuditEventsRequest;
 use App\Http\Resources\Api\V1\AuditEventResource;
+use App\Http\Resources\Api\V1\AuditHealthResource;
 use App\Http\Resources\Api\V1\AuditMetricsResource;
 use App\Models\Merchant;
 use App\Services\ApiKeys\ApiRequestContext;
@@ -87,6 +89,23 @@ class AuditEventController extends Controller
         $merchant = $this->authenticatedMerchant($context);
 
         return new AuditMetricsResource($action->execute($merchant, $request));
+    }
+
+    /**
+     * Operational health of the audit subsystem (global, aggregate-only).
+     *
+     * Authentication is still required (api.key), but the returned health
+     * state is deliberately merchant-AGNOSTIC: coarse operational status
+     * (retention validity, stale count, newest event age) with no
+     * merchant identifiers or audit contents — so any authenticated
+     * caller sees the same safe operational signal. Reads never create
+     * audit events — no recursion.
+     */
+    public function health(ApiRequestContext $context, GetAuditHealth $action): AuditHealthResource
+    {
+        $this->authenticatedMerchant($context);
+
+        return new AuditHealthResource($action->execute());
     }
 
     /**
