@@ -33,7 +33,8 @@
 <form method="{{ strtolower($httpMethod) }}"
       action="{{ $action }}"
       @if ($id !== null) id="{{ $id }}" @endif
-      data-confirm="{{ $message }}">
+      data-confirm="{{ $message }}"
+      {{ $attributes }}>
     @csrf
     @if ($spoofedMethod !== null)
         @method($spoofedMethod)

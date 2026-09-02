@@ -45,6 +45,32 @@
             form.addEventListener('submit', onFormSubmit);
         });
 
+        // One-time secret copy buttons: copy the text of the referenced
+        // element and confirm audibly/visually without altering the DOM text.
+        document.querySelectorAll('button[data-copy-target]').forEach((button) => {
+            button.addEventListener('click', () => {
+                const target = document.querySelector(button.dataset.copyTarget);
+
+                if (target === null) {
+                    return;
+                }
+
+                const finish = () => {
+                    button.dataset.originalLabel = button.dataset.originalLabel ?? button.textContent;
+                    button.textContent = 'Copied!';
+                    window.setTimeout(() => {
+                        button.textContent = button.dataset.originalLabel;
+                    }, 2000);
+                };
+
+                if (navigator.clipboard !== undefined && window.isSecureContext) {
+                    navigator.clipboard.writeText(target.textContent.trim()).then(finish).catch(finish);
+                } else {
+                    finish();
+                }
+            });
+        });
+
         document.querySelectorAll('.alert-dismissible').forEach((alert) => {
             window.setTimeout(() => {
                 alert.classList.remove('show');

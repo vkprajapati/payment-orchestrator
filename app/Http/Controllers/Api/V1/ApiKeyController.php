@@ -6,7 +6,8 @@ namespace App\Http\Controllers\Api\V1;
 
 use App\Actions\Api\HandleIdempotentRequest;
 use App\Actions\ApiKeys\CreateApiKey;
-use App\Actions\ApiKeys\CreatedApiKey;
+use App\Actions\ApiKeys\RotateApiKey;
+use App\Actions\ApiKeys\UpdateApiKeyScopes;
 use App\Enums\ApiKeyScope;
 use App\Enums\AuditEventName;
 use App\Enums\AuditOutcome;
@@ -22,13 +23,13 @@ use App\Services\Audit\AuditLogger;
 use Carbon\Carbon;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
-use Illuminate\Support\Facades\DB;
 use Symfony\Component\HttpFoundation\Response;
 
 class ApiKeyController extends Controller
 {
     public function __construct(
         protected AuditLogger $auditLogger,
+        protected UpdateApiKeyScopes $updateApiKeyScopes,
     ) {}
 
     /**
@@ -220,9 +221,7 @@ class ApiKeyController extends Controller
         $oldScopes = $key->scopes ?? ApiKeyScope::values();
         $newScopes = $request->scopes();
 
-        if ($oldScopes !== $newScopes) {
-            $key->forceFill(['scopes' => $newScopes])->save();
-
+        if ($this->updateApiKeyScopes->update($key, $newScopes)) {
             $this->auditLogger->log(
                 $merchant,
                 AuditEventName::ApiKeyScopesUpdated,
@@ -266,7 +265,7 @@ class ApiKeyController extends Controller
         string $reference,
         RotateApiKeyRequest $request,
         ApiRequestContext $context,
-        CreateApiKey $createApiKey,
+        RotateApiKey $rotateApiKey,
         HandleIdempotentRequest $idempotency,
     ): JsonResponse {
         $merchant = $this->authenticatedMerchant($context);
@@ -283,30 +282,11 @@ class ApiKeyController extends Controller
             $merchant,
             $request,
             $request->validated(),
-            function () use ($request, $key, $createApiKey, $merchant): JsonResponse {
-                $created = DB::transaction(function () use ($key, $createApiKey, $merchant): CreatedApiKey {
-                    // Replacement first: if anything below fails, the
-                    // transaction rolls it back together with the
-                    // revocation and the audit record.
-                    $created = $createApiKey->create(
-                        $merchant,
-                        $key->name,
-                        $key->label,
-                        null,
-                        // Exact scope inheritance: rotation must never
-                        // escalate or silently drop permissions. A legacy
-                        // NULL value keeps its full-access semantics.
-                        $key->scopes,
-                    );
-
-                    // Revocation is idempotent; a revoked_at timestamp is
-                    // never overwritten once set.
-                    if (! $key->isRevoked()) {
-                        $key->forceFill(['revoked_at' => now()])->save();
-                    }
-
-                    return $created;
-                });
+            function () use ($request, $key, $rotateApiKey, $merchant): JsonResponse {
+                // Shared rotation action: replacement creation (inheriting
+                // name, label, and the exact scope set) and old-key
+                // revocation happen inside one atomic transaction.
+                $created = $rotateApiKey->rotate($merchant, $key);
 
                 $this->auditLogger->log(
                     $merchant,

@@ -47,6 +47,18 @@ class Payment extends Model
     }
 
     /**
+     * Bind route models by the public reference, never the internal ID.
+     *
+     * Web URLs therefore read /payments/pay_XXXX and route() generation
+     * emits references automatically; the numeric surrogate key never
+     * appears in a URL.
+     */
+    public function getRouteKeyName(): string
+    {
+        return 'reference';
+    }
+
+    /**
      * Get the processing attempts made for this payment.
      *
      * A payment may be tried through several providers over its lifetime;

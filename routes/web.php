@@ -28,6 +28,15 @@ Route::middleware(['auth', 'verified', 'merchant'])->group(function () {
     Route::get('/settings/api-keys/{apiKey}/created', [ApiKeyController::class, 'created'])
         ->name('settings.api-keys.created');
 
+    Route::put('/settings/api-keys/{apiKey}/scopes', [ApiKeyController::class, 'updateScopes'])
+        ->name('settings.api-keys.scopes');
+
+    Route::post('/settings/api-keys/{apiKey}/rotate', [ApiKeyController::class, 'rotate'])
+        ->name('settings.api-keys.rotate');
+
+    Route::get('/settings/api-keys/{apiKey}', [ApiKeyController::class, 'show'])
+        ->name('settings.api-keys.show');
+
     Route::delete('/settings/api-keys/{apiKey}', [ApiKeyController::class, 'destroy'])
         ->name('settings.api-keys.destroy');
 });
