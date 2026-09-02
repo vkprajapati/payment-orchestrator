@@ -36,7 +36,7 @@ class AuditLogger
      * Whitelisted metadata keys that may be persisted. Anything else is
      * silently dropped — never blindly serialize request data here.
      */
-        private const SAFE_METADATA = ['amount', 'currency', 'provider', 'status', 'reason', 'scopes'];
+    private const SAFE_METADATA = ['amount', 'currency', 'provider', 'status', 'reason', 'scopes', 'old_scopes'];
 
     /**
      * Record a merchant audit event.

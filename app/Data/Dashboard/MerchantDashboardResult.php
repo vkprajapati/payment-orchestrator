@@ -5,6 +5,7 @@ namespace App\Data\Dashboard;
 use App\Enums\AuditOutcome;
 use App\Enums\PaymentStatus;
 use App\Enums\RefundStatus;
+use App\Models\AuditEvent;
 use Illuminate\Support\Collection;
 
 /**
@@ -26,8 +27,8 @@ final readonly class MerchantDashboardResult
      * @param  array<string, int>|null  $refundCounts  RefundStatus value => count (null when unavailable)
      * @param  int|null  $auditTotal  active audit events for the merchant (null when unavailable)
      * @param  array<string, int>|null  $auditByOutcome  AuditOutcome value => count (null when unavailable)
-     * @param  Collection<int, \App\Models\AuditEvent>|null  $recentActivity  bounded newest-first feed of
-     *                                                                        safe columns only (null when unavailable)
+     * @param  Collection<int, AuditEvent>|null  $recentActivity  bounded newest-first feed of
+     *                                                            safe columns only (null when unavailable)
      */
     public function __construct(
         public ?array $paymentCounts = null,

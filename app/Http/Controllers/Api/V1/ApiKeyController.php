@@ -7,12 +7,14 @@ namespace App\Http\Controllers\Api\V1;
 use App\Actions\Api\HandleIdempotentRequest;
 use App\Actions\ApiKeys\CreateApiKey;
 use App\Actions\ApiKeys\CreatedApiKey;
+use App\Enums\ApiKeyScope;
 use App\Enums\AuditEventName;
 use App\Enums\AuditOutcome;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Api\V1\CreateApiKeyRequest;
 use App\Http\Requests\Api\V1\RevokeApiKeyRequest;
 use App\Http\Requests\Api\V1\RotateApiKeyRequest;
+use App\Http\Requests\Api\V1\UpdateApiKeyScopesRequest;
 use App\Http\Resources\Api\V1\ApiKeyResource;
 use App\Models\Merchant;
 use App\Services\ApiKeys\ApiRequestContext;
@@ -173,6 +175,69 @@ class ApiKeyController extends Controller
         }
 
         return (new ApiKeyResource($key))->response();
+    }
+
+    /**
+     * Replace an API key's scopes.
+     *
+     * Merchant-scoped lookup: unknown and cross-merchant references return
+     * identical 404s. The raw secret is never touched — changing scopes
+     * never rotates or regenerates the key material.
+     *
+     * Self-lockout: updating the CURRENTLY-AUTHENTICATED key's scopes is
+     * allowed. This request has already passed the route's api_keys:write
+     * scope check under the key's previous scope set, so it completes
+     * successfully; the new scopes take effect immediately for every
+     * SUBSEQUENT request. If the key removes api_keys:write from itself,
+     * later privileged requests are rejected with a generic 403.
+     *
+     * Idempotency: replacing a scope set is naturally idempotent —
+     * applying the same set twice yields the same state, no artifact or
+     * secret is ever created, and only the first actual change writes an
+     * audit event. HandleIdempotentRequest is deliberately NOT used here
+     * (it exists for operations producing one-time secrets), so this is a
+     * deterministic state overwrite rather than a replay-scoped mutation.
+     *
+     * Concurrency: the updated scope JSON is written as a single atomic
+     * UPDATE (Eloquent save on one row), so concurrent requests can never
+     * apply a partially-mixed scope set — the last full set wins.
+     */
+    public function updateScopes(
+        string $reference,
+        UpdateApiKeyScopesRequest $request,
+        ApiRequestContext $context,
+    ): JsonResponse {
+        $merchant = $this->authenticatedMerchant($context);
+
+        $key = $merchant->apiKeys()
+            ->where('reference', $reference)
+            ->first();
+
+        if ($key === null) {
+            return response()->json(['message' => 'Not found.'], 404);
+        }
+
+        $oldScopes = $key->scopes ?? ApiKeyScope::values();
+        $newScopes = $request->scopes();
+
+        if ($oldScopes !== $newScopes) {
+            $key->forceFill(['scopes' => $newScopes])->save();
+
+            $this->auditLogger->log(
+                $merchant,
+                AuditEventName::ApiKeyScopesUpdated,
+                'PUT',
+                'api/v1/api-keys/'.$key->reference.'/scopes',
+                outcome: AuditOutcome::Success,
+                responseStatus: 200,
+                metadata: [
+                    'old_scopes' => $oldScopes,
+                    'scopes' => $newScopes,
+                ],
+            );
+        }
+
+        return (new ApiKeyResource($key->refresh()))->response();
     }
 
     /**

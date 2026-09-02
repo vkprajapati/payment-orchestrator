@@ -127,6 +127,8 @@ Route::middleware(['api.key', 'scope:api_keys:write', 'throttle:sensitive'])
             ->name('api.v1.api-keys.revoke');
         Route::post('/api-keys/{reference}/rotate', [ApiKeyController::class, 'rotate'])
             ->name('api.v1.api-keys.rotate');
+        Route::put('/api-keys/{reference}/scopes', [ApiKeyController::class, 'updateScopes'])
+            ->name('api.v1.api-keys.scopes.update');
     });
 
 /*

@@ -3,7 +3,10 @@
 namespace App\Actions\Dashboard;
 
 use App\Data\Dashboard\MerchantDashboardResult;
+use App\Models\AuditEvent;
 use App\Models\Merchant;
+use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\QueryException;
 use Illuminate\Support\Collection;
 
@@ -123,7 +126,7 @@ final class GetMerchantDashboard
      * identifiers). The secondary id DESC ordering keeps results
      * deterministic when performed_at values tie.
      *
-     * @return Collection<int, \App\Models\AuditEvent>|null
+     * @return Collection<int, AuditEvent>|null
      */
     private function recentActivity(Merchant $merchant): ?Collection
     {
@@ -147,7 +150,7 @@ final class GetMerchantDashboard
      * produce enum keys. The alias is a raw string straight from the
      * database, matching the array<string, int> shape of the result.
      *
-     * @param  \Illuminate\Database\Eloquent\Relations\HasMany<\Illuminate\Database\Eloquent\Model>  $relation
+     * @param  HasMany<Model>  $relation
      * @return array<string, int>
      */
     private function countsByColumn($relation, string $column): array
